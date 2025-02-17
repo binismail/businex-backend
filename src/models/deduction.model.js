@@ -47,7 +47,7 @@ const deductionSchema = new Schema(
       target_id: {
         type: Schema.Types.ObjectId,
         required: true,
-        refPath: "applications.target_type" 
+        ref: 'applications.target_type'
       },
       start_date: {
         type: Date,

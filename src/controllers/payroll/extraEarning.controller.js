@@ -103,9 +103,9 @@ exports.getExtraEarnings = async (req, res) => {
       };
     }
 
-    const extraEarnings = await ExtraEarning.find(query)
-      .populate("applications.target_id", "name email department")
-      .sort({ createdAt: -1 });
+    const extraEarnings = await ExtraEarning.find(query).sort({
+      createdAt: -1,
+    });
 
     res.status(200).json({
       message: "Extra earnings retrieved successfully",

@@ -30,7 +30,7 @@ exports.accountLoginWEmail = async (req, res) => {
     console.log(req.body);
     //  Math.floor(100000 + Math.random() * 900000);
     // Generate OTP
-    const otpCode = 100000; // 6-digit OTP
+    const otpCode = 200000; // 6-digit OTP
 
     // Save OTP in database with an expiration time (e.g., 5 minutes)
     const otp = new Otp({

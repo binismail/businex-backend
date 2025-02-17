@@ -6,37 +6,34 @@ const departmentSchema = new Schema(
     name: {
       type: String,
       required: true,
-      trim: true
+      trim: true,
     },
     code: {
       type: String,
       required: true,
       unique: true,
       trim: true,
-      uppercase: true
+      uppercase: true,
     },
     company: {
       type: Schema.Types.ObjectId,
       ref: "Company",
-      required: true
+      required: true,
     },
     description: {
       type: String,
-      default: ""
+      default: "",
     },
     status: {
       type: String,
       enum: ["active", "inactive"],
-      default: "active"
-    }
+      default: "active",
+    },
   },
   {
-    timestamps: true
+    timestamps: true,
   }
 );
-
-// Compound index to ensure department code is unique per company
-departmentSchema.index({ code: 1, company: 1 }, { unique: true });
 
 const Department = mongoose.model("Department", departmentSchema);
 

@@ -1,6 +1,6 @@
 const Deduction = require("../../models/deduction.model");
-const Employee = require("../../models/employees.model");
 const Department = require("../../models/department.model");
+const Employee = require("../../models/employees.model");
 
 // Create a new deduction
 exports.createDeduction = async (req, res) => {
@@ -103,9 +103,7 @@ exports.getDeductions = async (req, res) => {
       };
     }
 
-    const deductions = await Deduction.find(query)
-      .populate("applications.target_id", "name email department")
-      .sort({ createdAt: -1 });
+    const deductions = await Deduction.find(query);
 
     res.status(200).json({
       message: "Deductions retrieved successfully",

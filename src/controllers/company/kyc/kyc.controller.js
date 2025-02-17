@@ -14,7 +14,7 @@ exports.saveOnboardingStep = async (req, res) => {
     if (step === 1) {
       // For step 1, create new company if it doesn't exist
       const {
-        companyName,
+        companyName: name,
         businessIndustry,
         staffPower,
         email,
@@ -22,20 +22,31 @@ exports.saveOnboardingStep = async (req, res) => {
         address,
       } = data.company;
 
-      if (
-        !companyName ||
-        !businessIndustry ||
-        !email ||
-        !phoneNumber ||
-        !address
-      ) {
+      console.log({
+        name,
+      });
+
+      // Validate companyName
+      if (!name) {
+        return res.status(400).json({
+          message: "Company name is required",
+        });
+      }
+
+      const requiredFields = [
+        "businessIndustry",
+        "email",
+        "phoneNumber",
+        "address",
+      ];
+      if (requiredFields.some((field) => !data.company[field])) {
         return res.status(400).json({
           message: "All fields are required",
         });
       }
 
       // Check if company with same name exists
-      const existingCompany = await Company.findOne({ name: companyName });
+      const existingCompany = await Company.findOne({ name });
       if (existingCompany) {
         return res.status(400).json({
           message: "Company with this name already exists",
@@ -44,7 +55,7 @@ exports.saveOnboardingStep = async (req, res) => {
 
       // Create new company
       company = new Company({
-        name: companyName,
+        name,
         businessIndustry,
         staffSize: staffPower ?? "1-10",
         email,
