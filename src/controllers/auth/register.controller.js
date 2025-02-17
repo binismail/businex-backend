@@ -50,7 +50,7 @@ exports.register = async (req, res) => {
         name: adminUser.name,
         email: adminUser.email,
         role: adminUser.role,
-        company: company._id,
+        company: null,
       },
     });
   } catch (error) {
