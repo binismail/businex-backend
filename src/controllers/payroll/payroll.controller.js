@@ -146,45 +146,147 @@ exports.getAllPayrolls = async (req, res) => {
 // Get payroll by ID
 exports.getPayrollById = async (req, res) => {
   try {
-    const payroll = await Payroll.findById(req.params.id).populate(
-      "employee",
-      "name email"
-    );
+    const payroll = await Payroll.findById(req.params.id)
+      .populate({
+        path: "payslips.employee",
+        model: "Employee",
+        select: "name email department",
+      })
+      .populate({
+        path: "payslips.employee.department",
+        model: "Department",
+        select: "name",
+      });
+
     if (!payroll)
       return res.status(404).json({ message: "Payroll record not found" });
+
     res.status(200).json(payroll);
   } catch (error) {
     console.error("Payroll retrieval error:", error);
-    res
-      .status(500)
-      .json({ message: "Error fetching payroll record", error: error.message });
+    res.status(500).json({
+      message: "Error fetching payroll record",
+      error: error.message,
+    });
   }
 };
 
 // Update payroll record (e.g., mark as paid, update deductions, etc.)
 exports.updatePayroll = async (req, res) => {
   try {
-    const { salary, deductions, bonuses, status, pay_slip } = req.body;
+    const { payrollId } = req.params;
+    const { status, name, period, payslips } = req.body;
+    const companyId = req.user.company;
 
-    const payroll = await Payroll.findById(req.params.id);
-    if (!payroll)
+    // Find the payroll and ensure it belongs to the company
+    const payroll = await Payroll.findOne({
+      _id: payrollId,
+      company: companyId,
+    });
+
+    if (!payroll) {
       return res.status(404).json({ message: "Payroll record not found" });
+    }
 
-    // Update fields
-    payroll.salary = salary || payroll.salary;
-    payroll.deductions = deductions || payroll.deductions;
-    payroll.bonuses = bonuses || payroll.bonuses;
-    payroll.net_salary = payroll.salary - payroll.deductions + payroll.bonuses;
-    payroll.status = status || payroll.status;
-    payroll.pay_slip = pay_slip || payroll.pay_slip;
+    // Validate status changes
+    const allowedStatusTransitions = {
+      draft: ["pending"],
+      pending: ["processing", "draft"],
+      processing: ["completed", "failed"],
+      completed: [],
+      failed: ["draft", "pending"],
+    };
+
+    if (status) {
+      const currentStatus = payroll.status;
+      const validTransitions = allowedStatusTransitions[currentStatus] || [];
+
+      if (!validTransitions.includes(status)) {
+        return res.status(400).json({
+          message: `Invalid status transition from ${currentStatus} to ${status}`,
+          allowedTransitions: validTransitions,
+        });
+      }
+
+      payroll.status = status;
+      // Map main status to processing history status
+      const processingHistoryStatusMap = {
+        draft: "started",
+        pending: "started",
+        processing: "processing",
+        completed: "completed",
+        failed: "failed",
+      };
+
+      payroll.processing_history.push({
+        status: processingHistoryStatusMap[status],
+        message: `Status changed from ${currentStatus} to ${status}`,
+        timestamp: new Date(),
+      });
+    }
+
+    // Optional updates
+    if (name) payroll.name = name;
+    if (period) {
+      if (period.start_date) payroll.period.start_date = period.start_date;
+      if (period.end_date) payroll.period.end_date = period.end_date;
+    }
+
+    // Optionally update specific payslips if provided
+    if (payslips && Array.isArray(payslips)) {
+      payslips.forEach((updatedPayslip) => {
+        const existingPayslipIndex = payroll.payslips.findIndex(
+          (p) => p.employee.toString() === updatedPayslip.employee
+        );
+
+        if (existingPayslipIndex !== -1) {
+          // Merge the updated payslip data
+          payroll.payslips[existingPayslipIndex] = {
+            ...payroll.payslips[existingPayslipIndex],
+            ...updatedPayslip,
+          };
+        }
+      });
+    }
+
+    // Recalculate summary if payslips are modified
+    if (payslips) {
+      payroll.summary = {
+        total_gross: payroll.payslips.reduce(
+          (sum, slip) => sum + slip.gross_pay,
+          0
+        ),
+        total_deductions: payroll.payslips.reduce(
+          (sum, slip) =>
+            sum +
+            slip.deductions.reduce((deductSum, d) => deductSum + d.amount, 0),
+          0
+        ),
+        total_allowances: payroll.payslips.reduce(
+          (sum, slip) =>
+            sum +
+            slip.allowances.reduce((allowSum, a) => allowSum + a.amount, 0),
+          0
+        ),
+        total_net: payroll.payslips.reduce(
+          (sum, slip) => sum + slip.net_pay,
+          0
+        ),
+      };
+    }
 
     await payroll.save();
-    res.status(200).json({ message: "Payroll updated successfully", payroll });
+
+    res.status(200).json({
+      message: "Payroll updated successfully",
+      payroll,
+    });
   } catch (error) {
     console.error("Payroll update error:", error);
-    res
-      .status(400)
-      .json({ message: "Error updating payroll record", error: error.message });
+    res.status(400).json({
+      message: "Error updating payroll record",
+      error: error.message,
+    });
   }
 };
 
@@ -235,6 +337,7 @@ exports.schedulePayroll = async (req, res) => {
     });
 
     // Create payslips for each employee
+    // In the schedulePayroll method, modify the payslips creation
     const payslips = await Promise.all(
       employees.map(async (employee) => {
         // Calculate base values
@@ -256,16 +359,34 @@ exports.schedulePayroll = async (req, res) => {
 
         // Add any extra earnings that apply to this employee or their department
         const applicableExtraEarnings = extraEarnings.filter((earning) => {
-          return earning.applications.some(
-            (app) =>
+          return earning.applications.some((app) => {
+            console.log("Extra Earning Application:", {
+              earningName: earning.name,
+              targetType: app.target_type,
+              targetId: app.target_id,
+              status: app.status,
+              employeeId: employee._id,
+              employeeDepartment: employee.department,
+            });
+
+            return (
               app.status === "active" &&
-              ((app.target_type === "Employee" &&
-                app.target_id.equals(employee._id)) ||
-                (app.target_type === "Department" &&
+              ((app.target_type === "employee" &&
+                app.target_id &&
+                employee._id &&
+                app.target_id === employee._id) ||
+                (app.target_type === "department" &&
                   employee.department &&
-                  app.target_id.equals(employee.department._id)))
-          );
+                  app.target_id &&
+                  app.target_id === employee.department._id))
+            );
+          });
         });
+
+        console.log(
+          "Applicable Extra Earnings:",
+          applicableExtraEarnings.map((e) => e.name)
+        );
 
         const extraAllowances = applicableExtraEarnings.map((earning) => ({
           type: earning.name,
@@ -304,16 +425,34 @@ exports.schedulePayroll = async (req, res) => {
 
         // Add any applicable deductions for this employee or their department
         const applicableDeductions = deductions.filter((deduction) => {
-          return deduction.applications.some(
-            (app) =>
+          return deduction.applications.some((app) => {
+            console.log("Deduction Application:", {
+              deductionName: deduction.name,
+              targetType: app.target_type,
+              targetId: app.target_id,
+              status: app.status,
+              employeeId: employee._id,
+              employeeDepartment: employee.department,
+            });
+
+            return (
               app.status === "active" &&
-              ((app.target_type === "Employee" &&
-                app.target_id.equals(employee._id)) ||
-                (app.target_type === "Department" &&
+              ((app.target_type === "employee" &&
+                app.target_id &&
+                employee._id &&
+                app.target_id === employee._id) ||
+                (app.target_type === "department" &&
                   employee.department &&
-                  app.target_id.equals(employee.department._id)))
-          );
+                  app.target_id &&
+                  app.target_id === employee.department._id))
+            );
+          });
         });
+
+        console.log(
+          "Applicable Deductions:",
+          applicableDeductions.map((d) => d.name)
+        );
 
         const extraDeductions = applicableDeductions.map((deduction) => ({
           type: deduction.name,

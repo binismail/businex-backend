@@ -51,7 +51,7 @@ router.get(
   getPayrollById
 );
 
-router.put("/updatePayroll", checkUser(permissionsByRole.admin), updatePayroll);
+router.put("/updatePayroll/:payrollId", checkUser(permissionsByRole.admin), updatePayroll);
 
 router.delete(
   "/deletePayroll",

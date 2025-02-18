@@ -38,28 +38,30 @@ const deductionSchema = new Schema(
       default: "active",
     },
     // Track where this deduction is applied
-    applications: [{
-      target_type: {
-        type: String,
-        enum: ["Employee", "Department"], 
-        required: true
+    applications: [
+      {
+        target_type: {
+          type: String,
+          enum: ["employee", "department"],
+          required: true,
+        },
+        target_id: {
+          type: Schema.Types.ObjectId,
+          required: true,
+          ref: "applications.target_type",
+        },
+        start_date: {
+          type: Date,
+          required: true,
+        },
+        end_date: Date,
+        status: {
+          type: String,
+          enum: ["active", "inactive"],
+          default: "active",
+        },
       },
-      target_id: {
-        type: Schema.Types.ObjectId,
-        required: true,
-        ref: 'applications.target_type'
-      },
-      start_date: {
-        type: Date,
-        required: true
-      },
-      end_date: Date,
-      status: {
-        type: String,
-        enum: ["active", "inactive"],
-        default: "active"
-      }
-    }]
+    ],
   },
   {
     timestamps: true,
@@ -68,17 +70,32 @@ const deductionSchema = new Schema(
 
 // Add indexes for better query performance
 deductionSchema.index({ company: 1, status: 1 });
-deductionSchema.index({ "applications.target_type": 1, "applications.target_id": 1 });
+deductionSchema.index({
+  "applications.target_type": 1,
+  "applications.target_id": 1,
+});
 
 // Pre-save middleware to validate references
-deductionSchema.pre('save', async function(next) {
+// Pre-save middleware to validate references
+deductionSchema.pre("save", async function (next) {
   try {
-    if (this.isModified('applications')) {
+    if (this.isModified("applications")) {
       for (const app of this.applications) {
-        const Model = mongoose.model(app.target_type);
+        const modelName =
+          app.target_type.charAt(0).toUpperCase() +
+          app.target_type.slice(1).toLowerCase();
+
+        let Model;
+        try {
+          Model = mongoose.model(modelName);
+        } catch (modelError) {
+          console.error(`Model not found for target type: ${modelName}`);
+          throw new Error(`Invalid target type: ${modelName}`);
+        }
+
         const target = await Model.findById(app.target_id);
         if (!target) {
-          throw new Error(`${app.target_type} with ID ${app.target_id} not found`);
+          throw new Error(`${modelName} with ID ${app.target_id} not found`);
         }
       }
     }
@@ -89,11 +106,11 @@ deductionSchema.pre('save', async function(next) {
 });
 
 // Virtual populate for target details
-deductionSchema.virtual('applications.target_details', {
-  refPath: 'applications.target_type',
-  localField: 'applications.target_id',
-  foreignField: '_id',
-  justOne: true
+deductionSchema.virtual("applications.target_details", {
+  refPath: "applications.target_type",
+  localField: "applications.target_id",
+  foreignField: "_id",
+  justOne: true,
 });
 
 const Deduction = mongoose.model("Deduction", deductionSchema);

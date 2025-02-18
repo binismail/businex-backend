@@ -1,74 +1,104 @@
-const axios = require('axios');
+const axios = require("axios");
 
-// Nigerian banks list (dummy data)
-const BANKS = [
-  { name: "Access Bank", code: "044" },
-  { name: "Zenith Bank", code: "057" },
-  { name: "First Bank of Nigeria", code: "011" },
-  { name: "United Bank for Africa", code: "033" },
-  { name: "Guaranty Trust Bank", code: "058" },
-  { name: "Union Bank", code: "032" },
-  { name: "Fidelity Bank", code: "070" },
-  { name: "Ecobank", code: "050" },
-  { name: "Sterling Bank", code: "232" },
-  { name: "Unity Bank", code: "215" },
-  { name: "Stanbic IBTC Bank", code: "221" },
-  { name: "Standard Chartered", code: "068" },
-  { name: "Wema Bank", code: "035" },
-  { name: "Citibank", code: "023" },
-  { name: "Polaris Bank", code: "076" }
-];
+// const serverUrl = process.env.XPRESS_SERVER_URL;
 
-// Get banks list
+// Get banks list from Xpress Wallet
 exports.getBanks = async (req, res) => {
   try {
+    // Fetch banks
+    const serverUrl = `https://payment.xpress-wallet.com/api/v1/transfer/banks`;
+    const response = await axios.get(serverUrl, {
+      headers: {
+        Authorization: `Bearer ${process.env.XPRESS_ACCESS_TOKEN}`,
+      },
+    });
+
     res.status(200).json({
       message: "Banks retrieved successfully",
-      banks: BANKS
+      banks: response.data.banks,
     });
   } catch (error) {
+    console.error(
+      "Get Banks Error:",
+      error.response ? error.response.data : error.message
+    );
     res.status(500).json({
       message: "Error fetching banks",
-      error: error.message
+      error: error.message,
     });
   }
 };
 
-// Verify bank account (dummy verification)
+// Verify bank account
 exports.verifyBankAccount = async (req, res) => {
   try {
     const { account_number, bank_code } = req.body;
 
+    // Validate input
     if (!account_number || !bank_code) {
       return res.status(400).json({
-        message: "Account number and bank code are required"
+        message: "Account number and bank code are required",
       });
     }
 
-    // Find bank name from code
-    const bank = BANKS.find(b => b.code === bank_code);
-    if (!bank) {
-      return res.status(400).json({
-        message: "Invalid bank code"
+    // Verify account
+    const serverUrl = `https://payment.xpress-wallet.com/api/v1/transfer/account/details`;
+    const response = await axios.get(serverUrl, {
+      params: {
+        sortCode: bank_code,
+        accountNumber: account_number,
+      },
+      headers: {
+        Authorization: `Bearer ${process.env.XPRESS_ACCESS_TOKEN}`,
+      },
+    });
+
+    // Check if account verification was successful
+    if (!response.data.status) {
+      return res.status(404).json({
+        message: "Account verification failed",
+        details: response.data,
       });
     }
 
-    // Dummy verification - just returns a formatted name
-    const accountName = `TEST ACCOUNT ${account_number.slice(-4)}`;
+    // Transform response
+    const verifiedAccount = {
+      accountName: response.data.account.accountName,
+      accountNumber: response.data.account.accountNumber,
+      bankCode: response.data.account.bankCode,
+      bankName: null, // You might want to match this with your bank list
+    };
 
     res.status(200).json({
       message: "Account verified successfully",
-      data: {
-        accountName,
-        accountNumber: account_number,
-        bankCode: bank_code,
-        bankName: bank.name
-      }
+      data: verifiedAccount,
     });
   } catch (error) {
+    console.error(
+      "Verify Account Error:",
+      error.response ? error.response.data : error.message
+    );
     res.status(400).json({
       message: "Could not verify account",
-      error: error.message
+      error: error.message,
+      details: error.response ? error.response.data : null,
+    });
+  }
+};
+
+// Optional: Refresh token method
+exports.refreshXpressWalletToken = async (req, res) => {
+  try {
+    const { refreshToken } = await authenticateXpressWallet();
+
+    res.status(200).json({
+      message: "Token refreshed successfully",
+      refreshToken,
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: "Error refreshing token",
+      error: error.message,
     });
   }
 };
