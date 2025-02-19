@@ -630,6 +630,30 @@ exports.processPayroll = async (req, res) => {
       });
     }
 
+    // Check wallet balance before processing
+    const wallet = await Wallet.findOne({ company: companyId }).session(session);
+    if (!wallet) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ 
+        message: "Company wallet not found" 
+      });
+    }
+
+    // Calculate total payroll amount
+    const totalPayrollAmount = payroll.payslips.reduce((total, payslip) => total + payslip.net_pay, 0);
+    
+    // Check if wallet has sufficient balance
+    if (wallet.balance < totalPayrollAmount) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ 
+        message: "Insufficient wallet balance", 
+        requiredAmount: totalPayrollAmount, 
+        currentBalance: wallet.balance 
+      });
+    }
+
     // Check if payroll can be processed
     if (payroll.status !== "pending") {
       await session.abortTransaction();
