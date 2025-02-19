@@ -27,7 +27,6 @@ exports.accountLoginWEmail = async (req, res) => {
     if (!isPasswordValid) {
       return res.status(400).json({ message: "Invalid password" });
     }
-    console.log(req.body);
     //  Math.floor(100000 + Math.random() * 900000);
     // Generate OTP
     const otpCode = 200000; // 6-digit OTP

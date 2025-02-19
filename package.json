@@ -9,7 +9,9 @@
     "start": "node server.js",
     "seed": "node src/seeders/index.js",
     "seed:wallets": "node scripts/walletSeeder.js",
-    "fund-wallet": "node scripts/fundCompanyWallet.js"
+    "seed:payroll": "node scripts/seedSinglePayroll.js",
+    "fund-wallet": "node scripts/fundCompanyWallet.js",
+    "test:payroll": "node scripts/testPayrollProcessing.js"
   },
   "author": "pay4it",
   "license": "MIT",
