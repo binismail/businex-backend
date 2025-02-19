@@ -2,9 +2,11 @@ const mongoose = require("mongoose");
 const Payroll = require("../../models/payroll.model");
 const Employee = mongoose.model("Employee");
 const Transaction = require("../../models/transaction.model");
+const Wallet = require("../../models/wallet.model");
 const { generatePayslip } = require("../../utils/payslipGenerator");
 const { processBankTransfer } = require("../../utils/bankTransfer");
 const { calculateTax } = require("../../utils/taxCalculator");
+const WalletService = require("../../services/walletService");
 
 // Create a payroll record for an employee
 exports.createPayroll = async (req, res) => {
@@ -631,26 +633,31 @@ exports.processPayroll = async (req, res) => {
     }
 
     // Check wallet balance before processing
-    const wallet = await Wallet.findOne({ company: companyId }).session(session);
+    const wallet = await Wallet.findOne({ company: companyId }).session(
+      session
+    );
     if (!wallet) {
       await session.abortTransaction();
       session.endSession();
-      return res.status(400).json({ 
-        message: "Company wallet not found" 
+      return res.status(400).json({
+        message: "Company wallet not found",
       });
     }
 
     // Calculate total payroll amount
-    const totalPayrollAmount = payroll.payslips.reduce((total, payslip) => total + payslip.net_pay, 0);
-    
+    const totalPayrollAmount = payroll.payslips.reduce(
+      (total, payslip) => total + payslip.net_pay,
+      0
+    );
+
     // Check if wallet has sufficient balance
-    if (wallet.balance < totalPayrollAmount) {
+    if (wallet.wallet.availableBalance < totalPayrollAmount) {
       await session.abortTransaction();
       session.endSession();
-      return res.status(400).json({ 
-        message: "Insufficient wallet balance", 
-        requiredAmount: totalPayrollAmount, 
-        currentBalance: wallet.balance 
+      return res.status(400).json({
+        message: "Insufficient wallet balance",
+        requiredAmount: totalPayrollAmount,
+        currentBalance: wallet.wallet.availableBalance,
       });
     }
 
@@ -684,17 +691,21 @@ exports.processPayroll = async (req, res) => {
           session
         );
 
+        console.log(employee.bankDetails);
+
         // Validate bank details
-        if (!employee.bankAccount || !employee.bankAccount.accountNumber) {
-          throw new Error(`No bank account details for employee ${employee.name}`);
+        if (!employee.bankDetails || !employee.bankDetails.accountNumber) {
+          throw new Error(
+            `No bank account details for employee ${employee.name}`
+          );
         }
 
         // Prepare transfer details
         const transferDetails = {
           amount: payslip.net_pay,
-          sortCode: employee.bankAccount.bankCode,
-          accountNumber: employee.bankAccount.accountNumber,
-          accountName: employee.bankAccount.accountName,
+          sortCode: employee.bankDetails.bankCode,
+          accountNumber: employee.bankDetails.accountNumber,
+          accountName: employee.bankDetails.accountName,
           companyId: companyId,
           employeeId: employee._id,
           metadata: {
@@ -705,7 +716,9 @@ exports.processPayroll = async (req, res) => {
         };
 
         // Perform bank transfer
-        const transferResult = await WalletService.transferToBank(transferDetails);
+        const transferResult = await WalletService.transferToBank(
+          transferDetails
+        );
 
         // Update payslip status
         payslip.status = transferResult.success ? "completed" : "failed";
@@ -734,11 +747,12 @@ exports.processPayroll = async (req, res) => {
     }
 
     // Determine overall payroll status
-    payroll.status = failedTransfers.length === 0
-      ? "completed"
-      : (failedTransfers.length === payroll.payslips.length
-          ? "failed"
-          : "partially_completed");
+    payroll.status =
+      failedTransfers.length === 0
+        ? "completed"
+        : failedTransfers.length === payroll.payslips.length
+        ? "failed"
+        : "partially_completed";
 
     // Update processing history
     payroll.processing_history.push({
