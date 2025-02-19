@@ -46,6 +46,7 @@ const companySchema = new Schema(
         lastName: { type: String, required: true },
         email: { type: String, required: true },
         phone: { type: String, required: true },
+        bvn: { type: String, default: "" },
       },
     ],
     // Payroll Settings
@@ -98,6 +99,10 @@ const companySchema = new Schema(
       type: String,
       enum: ["pending", "in_review", "approved", "rejected"],
       default: "pending",
+    },
+    wallet: {
+      type: Schema.Types.ObjectId,
+      ref: 'Wallet'
     },
     kycDetails: {
       reviewedAt: { type: Date },

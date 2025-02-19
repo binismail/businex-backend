@@ -3,10 +3,18 @@ const Schema = mongoose.Schema;
 
 const transactionSchema = new Schema(
   {
+    // Optional references
     employee: {
       type: Schema.Types.ObjectId,
       ref: "Employee",
-      required: true,
+    },
+    company: {
+      type: Schema.Types.ObjectId,
+      ref: "Company",
+    },
+    wallet: {
+      type: Schema.Types.ObjectId,
+      ref: "Wallet",
     },
     amount: {
       type: Number,
@@ -14,29 +22,60 @@ const transactionSchema = new Schema(
     },
     type: {
       type: String,
-      enum: ["credit", "debit"],
+      enum: [
+        // Wallet transactions
+        "wallet_credit", 
+        "wallet_debit", 
+        
+        // Employee transactions
+        "salary_credit", 
+        "bonus_credit", 
+        "deduction_debit",
+        
+        // Other financial transactions
+        "credit", 
+        "debit"
+      ],
       required: true,
     },
     status: {
       type: String,
       enum: ["successful", "failed", "pending"],
-      default: "successful",
+      default: "pending",
     },
     description: {
       type: String,
     },
     provider: {
       type: String,
-      required: true,
+      default: "Xpress Wallet",
     },
     transactionId: {
-      type: String, // Bank transaction ID
+      type: String, // External transaction ID
     },
+    reference: {
+      type: String, // Unique transaction reference
+      unique: true,
+    },
+    metadata: {
+      type: Schema.Types.Mixed, // Flexible metadata storage
+    },
+    balance_before: {
+      type: Number,
+      default: 0
+    },
+    balance_after: {
+      type: Number,
+      default: 0
+    }
   },
   {
     timestamps: true,
   }
 );
+
+// Create a unique index on reference to prevent duplicates
+transactionSchema.index({ reference: 1 }, { unique: true });
 
 const Transaction = mongoose.model("Transaction", transactionSchema);
 

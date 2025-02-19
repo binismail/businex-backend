@@ -608,22 +608,32 @@ exports.getPayrollSummary = async (req, res) => {
 
 // Process a payroll
 exports.processPayroll = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
     const { payrollId } = req.params;
     const companyId = req.user.company;
 
+    // Find the specific payroll
     const payroll = await Payroll.findOne({
       _id: payrollId,
       company: companyId,
-    });
+    }).session(session);
 
+    // Check if payroll exists
     if (!payroll) {
+      await session.abortTransaction();
+      session.endSession();
       return res.status(404).json({
         message: "Payroll not found",
       });
     }
 
+    // Check if payroll can be processed
     if (payroll.status !== "pending") {
+      await session.abortTransaction();
+      session.endSession();
       return res.status(400).json({
         message: `Cannot process payroll in ${payroll.status} status`,
       });
@@ -634,92 +644,110 @@ exports.processPayroll = async (req, res) => {
     payroll.processing_history.push({
       status: "started",
       message: "Started payroll processing",
+      timestamp: new Date(),
     });
-    await payroll.save();
+    await payroll.save({ session });
 
-    // Process each payslip
-    let totalGross = 0;
-    let totalDeductions = 0;
-    let totalAllowances = 0;
-    let totalNet = 0;
+    // Prepare transfer results
+    const transferResults = [];
+    const failedTransfers = [];
 
+    // Process transfers for each payslip
     for (const payslip of payroll.payslips) {
       try {
-        // Get employee details
-        const employee = await Employee.findById(payslip.employee);
-
-        // Calculate deductions (tax, etc.)
-        const tax = calculateTax(employee.salary);
-
-        // Add tax deduction
-        payslip.deductions.push({
-          type: "tax",
-          amount: tax,
-          description: "Income Tax",
-        });
-
-        // Calculate totals
-        const totalDeduction = payslip.deductions.reduce(
-          (sum, d) => sum + d.amount,
-          0
-        );
-        const totalAllowance = payslip.allowances.reduce(
-          (sum, a) => sum + a.amount,
-          0
+        // Fetch employee details
+        const employee = await Employee.findById(payslip.employee).session(
+          session
         );
 
-        payslip.gross_pay = employee.salary + totalAllowance;
-        payslip.net_pay = payslip.gross_pay - totalDeduction;
-        payslip.status = "completed";
+        // Validate bank details
+        if (!employee.bankAccount || !employee.bankAccount.accountNumber) {
+          throw new Error(`No bank account details for employee ${employee.name}`);
+        }
 
-        // Update running totals
-        totalGross += payslip.gross_pay;
-        totalDeductions += totalDeduction;
-        totalAllowances += totalAllowance;
-        totalNet += payslip.net_pay;
-      } catch (error) {
-        payslip.status = "failed";
+        // Prepare transfer details
+        const transferDetails = {
+          amount: payslip.net_pay,
+          sortCode: employee.bankAccount.bankCode,
+          accountNumber: employee.bankAccount.accountNumber,
+          accountName: employee.bankAccount.accountName,
+          companyId: companyId,
+          employeeId: employee._id,
+          metadata: {
+            payrollId: payrollId,
+            payslipId: payslip._id,
+            payPeriod: payroll.pay_period,
+          },
+        };
+
+        // Perform bank transfer
+        const transferResult = await WalletService.transferToBank(transferDetails);
+
+        // Update payslip status
+        payslip.status = transferResult.success ? "completed" : "failed";
+        payslip.transaction = transferResult.transaction._id;
+
+        transferResults.push(transferResult);
+
+        if (!transferResult.success) {
+          failedTransfers.push(transferResult);
+        }
+      } catch (payslipError) {
         console.error(
           `Error processing payslip for employee ${payslip.employee}:`,
-          error
+          payslipError
         );
+
+        // Mark payslip as failed
+        payslip.status = "failed";
+        payslip.error = payslipError.message;
+
+        failedTransfers.push({
+          employeeId: payslip.employee,
+          error: payslipError.message,
+        });
       }
     }
 
-    // Update payroll summary
-    payroll.summary = {
-      total_gross: totalGross,
-      total_deductions: totalDeductions,
-      total_allowances: totalAllowances,
-      total_net: totalNet,
-    };
+    // Determine overall payroll status
+    payroll.status = failedTransfers.length === 0
+      ? "completed"
+      : (failedTransfers.length === payroll.payslips.length
+          ? "failed"
+          : "partially_completed");
 
-    // Update payroll status
-    payroll.status = "completed";
+    // Update processing history
     payroll.processing_history.push({
-      status: "completed",
-      message: "Payroll processing completed",
+      status: payroll.status,
+      message: `Payroll processing ${payroll.status}`,
+      failedTransfers: failedTransfers.length,
+      timestamp: new Date(),
     });
 
-    // If recurring, calculate next run date
-    if (payroll.schedule.is_recurring) {
-      payroll.schedule.last_run = new Date();
-      payroll.schedule.next_run = calculateNextRunDate(
-        payroll.frequency,
-        payroll.schedule.last_run
-      );
-    }
+    // Save updated payroll
+    await payroll.save({ session });
 
-    await payroll.save();
+    // Commit transaction
+    await session.commitTransaction();
+    session.endSession();
 
+    // Prepare response
     res.status(200).json({
-      message: "Payroll processed successfully",
+      message: "Payroll processed",
+      status: payroll.status,
+      totalPayslips: payroll.payslips.length,
+      successfulTransfers: transferResults.filter((r) => r.success).length,
+      failedTransfers: failedTransfers.length,
       payroll,
     });
   } catch (error) {
-    console.error("Payroll processing error:", error);
+    // Abort transaction in case of error
+    await session.abortTransaction();
+    session.endSession();
+
+    console.error("Payroll Processing Error:", error);
     res.status(500).json({
-      message: "Error processing payroll",
+      message: "Failed to process payroll",
       error: error.message,
     });
   }
