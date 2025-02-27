@@ -232,11 +232,10 @@ exports.deleteDeduction = async (req, res) => {
     const { deduction_id } = req.params;
     const companyId = req.user.company;
 
-    const deduction = await Deduction.findOneAndUpdate(
-      { _id: deduction_id, company: companyId },
-      { status: "inactive" },
-      { new: true }
-    );
+    const deduction = await Deduction.findOneAndDelete({
+      _id: deduction_id,
+      company: companyId
+    });
 
     if (!deduction) {
       return res.status(404).json({ message: "Deduction not found" });
@@ -247,6 +246,7 @@ exports.deleteDeduction = async (req, res) => {
       data: deduction,
     });
   } catch (error) {
+    console.error("Error deleting deduction:", error);
     res.status(500).json({
       message: "Error deleting deduction",
       error: error.message,

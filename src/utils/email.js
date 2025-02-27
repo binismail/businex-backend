@@ -1,10 +1,16 @@
 const formData = require("form-data");
 const Mailgun = require("mailgun.js");
+const { baseStyle, templates } = require("./emailTemplates");
+require("dotenv").config();
 
 class EmailService {
   constructor() {
     // Validate Mailgun configuration
     if (!process.env.MAILGUN_API_KEY || !process.env.MAILGUN_DOMAIN) {
+      console.error("Missing Mailgun configuration:", {
+        MAILGUN_API_KEY: !!process.env.MAILGUN_API_KEY,
+        MAILGUN_DOMAIN: !!process.env.MAILGUN_DOMAIN,
+      });
       throw new Error(
         "Mailgun configuration is missing. Please set MAILGUN_API_KEY and MAILGUN_DOMAIN"
       );
@@ -18,7 +24,7 @@ class EmailService {
     });
 
     // Default sender
-    this.defaultSender = `Businex <noreply@${process.env.MAILGUN_DOMAIN}>`;
+    this.defaultSender = `Businex <kabcoder@gmail.com>`;
   }
 
   /**
@@ -38,94 +44,111 @@ class EmailService {
         to: options.to,
         subject: options.subject,
         text: options.text,
-        html: options.html,
+        html: options.html ? baseStyle + options.html : undefined,
       };
 
       const response = await this.client.messages.create(
         process.env.MAILGUN_DOMAIN,
         messageData
       );
-
-      console.log("Email sent successfully:", response);
       return response;
     } catch (error) {
       console.error("Email sending failed:", error);
+      // Log more details about the error
+      if (error.response) {
+        console.error("Mailgun API Error:", {
+          status: error.response.status,
+          data: error.response.data,
+        });
+      }
       throw error;
     }
   }
 
-  /**
-   * Send welcome email to new user
-   * @param {Object} user - User details
-   */
-  async sendWelcomeEmail(user) {
-    const subject = "Welcome to Businex!";
-    const text = `Hello ${user.name},\n\nWelcome to Businex! We're excited to have you on board.`;
-    const html = `
-      <h1>Welcome to Businex!</h1>
-      <p>Hello ${user.name},</p>
-      <p>We're excited to have you join our platform. Get started by exploring your dashboard.</p>
-      <a href="${process.env.FRONTEND_URL}/login">Login to Businex</a>
-    `;
-
-    await this.sendEmail({
-      to: user.email,
-      subject,
-      text,
-      html,
+  // Authentication Emails
+  async sendOTPEmail(email, otp) {
+    return this.sendEmail({
+      to: email,
+      subject: "Your Verification Code",
+      text: `Your verification code is: ${otp}`,
+      html: templates.otpVerification(otp),
     });
   }
 
-  /**
-   * Send password reset email
-   * @param {Object} user - User details
-   * @param {string} resetToken - Password reset token
-   */
-  async sendPasswordResetEmail(user, resetToken) {
-    const resetLink = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`;
-    const subject = "Password Reset Request";
-    const text = `You requested a password reset. Click the following link to reset your password: ${resetLink}`;
-    const html = `
-      <h2>Password Reset Request</h2>
-      <p>You requested a password reset. Click the button below to reset your password:</p>
-      <a href="${resetLink}" style="background-color: #4CAF50; color: white; padding: 14px 25px; text-align: center; text-decoration: none; display: inline-block;">
-        Reset Password
-      </a>
-      <p>If you did not request a password reset, please ignore this email.</p>
-    `;
-
-    await this.sendEmail({
-      to: user.email,
-      subject,
-      text,
-      html,
+  // Company Onboarding Emails
+  async sendOnboardingReviewEmail(companyData) {
+    return this.sendEmail({
+      to: companyData.email,
+      subject: "Onboarding Under Review",
+      text: `Hello ${companyData.companyName}, Your onboarding documents are under review.`,
+      html: templates.onboardingReview(companyData),
     });
   }
 
-  /**
-   * Send notification email
-   * @param {Object} options - Notification details
-   */
-  async sendNotificationEmail(options) {
-    const { recipient, subject, message, actionUrl, actionText } = options;
+  async sendCompanyApprovalEmail(companyData) {
+    return this.sendEmail({
+      to: companyData.email,
+      subject: "Welcome to BusineX! Company Approved",
+      text: `Congratulations! Your company ${companyData.companyName} has been approved.`,
+      html: templates.companyApproved(companyData),
+    });
+  }
 
-    const html = `
-      <h2>${subject}</h2>
-      <p>${message}</p>
-      ${
-        actionUrl
-          ? `<a href="${actionUrl}" style="background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none;">${
-              actionText || "Take Action"
-            }</a>`
-          : ""
-      }
-    `;
+  // Payroll Emails
+  async sendPayrollProcessedEmail(payrollData) {
+    return this.sendEmail({
+      to: payrollData.adminEmail,
+      subject: "Payroll Successfully Processed",
+      text: `Your payroll for ${payrollData.period} has been processed successfully.`,
+      html: templates.payrollProcessed(payrollData),
+    });
+  }
 
-    await this.sendEmail({
-      to: recipient,
-      subject,
-      text: message,
-      html,
+  async sendPayrollFailedEmail(payrollData) {
+    return this.sendEmail({
+      to: payrollData.adminEmail,
+      subject: "Payroll Processing Failed",
+      text: `There was an error processing your payroll for ${payrollData.period}.`,
+      html: templates.payrollFailed(payrollData),
+    });
+  }
+
+  async sendPayslipEmail(payslipData) {
+    return this.sendEmail({
+      to: payslipData.employeeEmail,
+      subject: `Your Payslip for ${payslipData.period}`,
+      text: `Your payslip for ${payslipData.period} is now available.`,
+      html: templates.payslip(payslipData),
+    });
+  }
+
+  // Employee Emails
+  async sendEmployeeWelcomeEmail(employeeData) {
+    return this.sendEmail({
+      to: employeeData.email,
+      subject: `Welcome to ${employeeData.companyName}`,
+      text: `Welcome to ${employeeData.companyName}! Please complete your profile setup.`,
+      html: templates.employeeCreated(employeeData),
+    });
+  }
+
+  // Wallet Emails
+  async sendLowBalanceAlert(walletData) {
+    return this.sendEmail({
+      to: walletData.adminEmail,
+      subject: "Low Wallet Balance Alert",
+      text: `Your wallet balance is running low. Current balance: ${walletData.currentBalance}`,
+      html: templates.lowWalletBalance(walletData),
+    });
+  }
+
+  // Waitlist Emails
+  async sendWaitlistConfirmation(waitlistData) {
+    return this.sendEmail({
+      to: waitlistData.email,
+      subject: "Welcome to BusineX Waitlist",
+      text: `Thank you for joining our waitlist, ${waitlistData.firstName}!`,
+      html: templates.waitlistSignup(waitlistData),
     });
   }
 }

@@ -7,6 +7,7 @@ const { generatePayslip } = require("../../utils/payslipGenerator");
 const { processBankTransfer } = require("../../utils/bankTransfer");
 const { calculateTax } = require("../../utils/taxCalculator");
 const WalletService = require("../../services/walletService");
+const emailService = require("../../utils/email");
 
 // Create a payroll record for an employee
 exports.createPayroll = async (req, res) => {
@@ -294,25 +295,69 @@ exports.updatePayroll = async (req, res) => {
 
 // Delete payroll record
 exports.deletePayroll = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
-    const payroll = await Payroll.findByIdAndDelete(req.params.id);
-    if (!payroll)
+    const { payrollId } = req.params;
+    const companyId = req.user.company;
+
+    // Find the payroll and ensure it belongs to the company
+    const payroll = await Payroll.findOne({
+      _id: payrollId,
+      company: companyId,
+    }).session(session);
+
+    if (!payroll) {
+      await session.abortTransaction();
+      session.endSession();
       return res.status(404).json({ message: "Payroll record not found" });
-    res.status(200).json({ message: "Payroll deleted successfully" });
+    }
+
+    // Check if payroll can be deleted
+    if (payroll.status === "completed") {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        message: "Cannot delete a completed payroll",
+        status: payroll.status,
+      });
+    }
+
+    // Delete the payroll
+    await Payroll.findByIdAndDelete(payrollId).session(session);
+
+    await session.commitTransaction();
+    session.endSession();
+
+    res.status(200).json({
+      message: "Payroll deleted successfully",
+      details: {
+        id: payroll._id,
+        name: payroll.name,
+        period: payroll.period,
+        status: payroll.status,
+      },
+    });
   } catch (error) {
     console.error("Payroll deletion error:", error);
-    res
-      .status(500)
-      .json({ message: "Error deleting payroll record", error: error.message });
+    await session.abortTransaction();
+    session.endSession();
+    res.status(500).json({
+      message: "Error deleting payroll record",
+      error: error.message,
+    });
   }
 };
 
 // Schedule a new payroll
 exports.schedulePayroll = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
     const { name, frequency, period_start, period_end, is_recurring } =
       req.body;
-
     const companyId = req.user.company;
 
     // Get all active employees for the company
@@ -338,203 +383,276 @@ exports.schedulePayroll = async (req, res) => {
       status: "active",
     });
 
-    // Create payslips for each employee
-    // In the schedulePayroll method, modify the payslips creation
-    const payslips = await Promise.all(
-      employees.map(async (employee) => {
-        // Calculate base values
-        const baseSalary = employee.salary || 0;
+    // Function to create payslips for a given period
+    const createPayslipsForPeriod = async (startDate, endDate, periodName) => {
+      const payslips = await Promise.all(
+        employees.map(async (employee) => {
+          // Calculate base values
+          const baseSalary = employee.salary || 0;
 
-        // Calculate allowances (30% of base salary)
-        const defaultAllowances = [
-          {
-            type: "transport",
-            amount: Math.round(baseSalary * 0.15),
-            description: "Transport Allowance",
-          },
-          {
-            type: "housing",
-            amount: Math.round(baseSalary * 0.15),
-            description: "Housing Allowance",
-          },
-        ];
+          // Calculate allowances (30% of base salary)
+          const defaultAllowances = [
+            {
+              type: "transport",
+              amount: 0,
+              description: "Transport Allowance",
+            },
+            {
+              type: "housing",
+              amount: 0,
+              description: "Housing Allowance",
+            },
+          ];
 
-        // Add any extra earnings that apply to this employee or their department
-        const applicableExtraEarnings = extraEarnings.filter((earning) => {
-          return earning.applications.some((app) => {
-            console.log("Extra Earning Application:", {
-              earningName: earning.name,
-              targetType: app.target_type,
-              targetId: app.target_id,
-              status: app.status,
-              employeeId: employee._id,
-              employeeDepartment: employee.department,
+          // Add any extra earnings that apply to this employee or their department
+          const applicableExtraEarnings = extraEarnings.filter((earning) => {
+            return earning.applications.some((app) => {
+              if (app.status !== "active") return false;
+
+              const currentDate = new Date();
+              if (app.start_date > currentDate) return false;
+              if (app.end_date && app.end_date < currentDate) return false;
+
+              if (app.target_type === "employee") {
+                return app.target_id.toString() === employee._id.toString();
+              }
+
+              if (app.target_type === "department") {
+                const departmentId =
+                  employee.department?._id || employee.department;
+                return (
+                  departmentId &&
+                  app.target_id.toString() === departmentId.toString()
+                );
+              }
+
+              return false;
             });
-
-            return (
-              app.status === "active" &&
-              ((app.target_type === "employee" &&
-                app.target_id &&
-                employee._id &&
-                app.target_id === employee._id) ||
-                (app.target_type === "department" &&
-                  employee.department &&
-                  app.target_id &&
-                  app.target_id === employee.department._id))
-            );
           });
-        });
 
-        console.log(
-          "Applicable Extra Earnings:",
-          applicableExtraEarnings.map((e) => e.name)
-        );
+          const extraAllowances = applicableExtraEarnings.map((earning) => ({
+            type: earning.name,
+            amount:
+              earning.type === "fixed"
+                ? earning.amount
+                : Math.round(baseSalary * (earning.amount / 100)),
+            description: earning.description,
+          }));
 
-        const extraAllowances = applicableExtraEarnings.map((earning) => ({
-          type: earning.name,
-          amount:
-            earning.type === "fixed"
-              ? earning.amount
-              : Math.round(baseSalary * (earning.amount / 100)),
-          description: earning.description,
-        }));
+          const allAllowances = [...defaultAllowances, ...extraAllowances];
+          const totalAllowances = allAllowances.reduce(
+            (sum, a) => sum + a.amount,
+            0
+          );
 
-        const allAllowances = [...defaultAllowances, ...extraAllowances];
-        const totalAllowances = allAllowances.reduce(
-          (sum, a) => sum + a.amount,
-          0
-        );
+          // Calculate gross pay
+          const grossPay = baseSalary + totalAllowances;
 
-        // Calculate gross pay
-        const grossPay = baseSalary + totalAllowances;
+          // Calculate deductions
+          const tax = calculateTax(grossPay).monthlyTax;
+          const pension = Math.round(baseSalary * 0.08);
 
-        // Calculate deductions
-        const tax = calculateTax(grossPay).monthlyTax;
-        const pension = Math.round(baseSalary * 0.08); // 8% pension contribution
+          const defaultDeductions = [
+            {
+              type: "tax",
+              amount: Math.round(tax),
+              description: "PAYE Tax",
+            },
+            {
+              type: "pension",
+              amount: pension,
+              description: "Pension Contribution",
+            },
+          ];
 
-        const defaultDeductions = [
-          {
-            type: "tax",
-            amount: Math.round(tax),
-            description: "PAYE Tax",
-          },
-          {
-            type: "pension",
-            amount: pension,
-            description: "Pension Contribution",
-          },
-        ];
+          // Add applicable deductions
+          const applicableDeductions = deductions.filter((deduction) => {
+            return deduction.applications.some((app) => {
+              if (app.status !== "active") return false;
 
-        // Add any applicable deductions for this employee or their department
-        const applicableDeductions = deductions.filter((deduction) => {
-          return deduction.applications.some((app) => {
-            console.log("Deduction Application:", {
-              deductionName: deduction.name,
-              targetType: app.target_type,
-              targetId: app.target_id,
-              status: app.status,
-              employeeId: employee._id,
-              employeeDepartment: employee.department,
+              const currentDate = new Date();
+              if (app.start_date > currentDate) return false;
+              if (app.end_date && app.end_date < currentDate) return false;
+
+              if (app.target_type === "employee") {
+                return app.target_id.toString() === employee._id.toString();
+              }
+
+              if (app.target_type === "department") {
+                const departmentId =
+                  employee.department?._id || employee.department;
+                return (
+                  departmentId &&
+                  app.target_id.toString() === departmentId.toString()
+                );
+              }
+
+              return false;
             });
-
-            return (
-              app.status === "active" &&
-              ((app.target_type === "employee" &&
-                app.target_id &&
-                employee._id &&
-                app.target_id === employee._id) ||
-                (app.target_type === "department" &&
-                  employee.department &&
-                  app.target_id &&
-                  app.target_id === employee.department._id))
-            );
           });
+
+          const extraDeductions = applicableDeductions.map((deduction) => ({
+            type: deduction.name,
+            amount:
+              deduction.type === "fixed"
+                ? deduction.amount
+                : Math.round(baseSalary * (deduction.amount / 100)),
+            description: deduction.description,
+          }));
+
+          const allDeductions = [...defaultDeductions, ...extraDeductions];
+          const totalDeductions = allDeductions.reduce(
+            (sum, d) => sum + d.amount,
+            0
+          );
+
+          // Calculate net pay
+          const netPay = grossPay - totalDeductions;
+
+          return {
+            employee: employee._id,
+            base_salary: baseSalary,
+            allowances: allAllowances,
+            deductions: allDeductions,
+            gross_pay: grossPay,
+            net_pay: netPay,
+            status: "pending",
+          };
+        })
+      );
+
+      // Calculate payroll summary
+      const summary = payslips.reduce(
+        (acc, slip) => ({
+          total_gross: acc.total_gross + slip.gross_pay,
+          total_deductions:
+            acc.total_deductions +
+            slip.deductions.reduce((sum, d) => sum + d.amount, 0),
+          total_allowances:
+            acc.total_allowances +
+            slip.allowances.reduce((sum, a) => sum + a.amount, 0),
+          total_net: acc.total_net + slip.net_pay,
+        }),
+        {
+          total_gross: 0,
+          total_deductions: 0,
+          total_allowances: 0,
+          total_net: 0,
+        }
+      );
+
+      // Create payroll document
+      const payroll = new Payroll({
+        company: companyId,
+        name: periodName,
+        period: {
+          start_date: startDate,
+          end_date: endDate,
+        },
+        frequency,
+        total_employees: employees.length,
+        payslips,
+        summary,
+        status: "pending",
+      });
+
+      return payroll;
+    };
+
+    const payrolls = [];
+    const startDate = new Date(period_start);
+    const endDate = new Date(period_end);
+    const currentYear = startDate.getFullYear();
+    const startMonth = startDate.getMonth();
+    const paymentDay = startDate.getDate();
+
+    // If recurring, create payrolls for all months including current month
+    if (is_recurring) {
+      // Create payrolls for current month through December in chronological order
+      for (let month = startMonth; month < 12; month++) {
+        // For monthly payroll, period should be entire month
+        let periodStartDate = new Date(currentYear, month, 1); // First day of month
+        let periodEndDate = new Date(currentYear, month + 1, 0); // Last day of month
+        let processDate = new Date(currentYear, month, paymentDay); // Payment/process date
+
+        // For the first month, respect the start date provided
+        if (month === startMonth) {
+          periodStartDate = new Date(startDate);
+        }
+
+        // If it's not monthly frequency, adjust the periods
+        if (frequency === "bi-weekly") {
+          // Two-week period starting from payment day
+          periodStartDate =
+            month === startMonth
+              ? new Date(startDate)
+              : new Date(currentYear, month, paymentDay);
+          periodEndDate = new Date(periodStartDate);
+          periodEndDate.setDate(periodStartDate.getDate() + 13);
+        } else if (frequency === "weekly") {
+          // One-week period starting from payment day
+          periodStartDate =
+            month === startMonth
+              ? new Date(startDate)
+              : new Date(currentYear, month, paymentDay);
+          periodEndDate = new Date(periodStartDate);
+          periodEndDate.setDate(periodStartDate.getDate() + 6);
+        }
+
+        const monthName = periodStartDate.toLocaleString("default", {
+          month: "long",
         });
+        const periodName = `${name} - ${monthName} ${currentYear}`;
 
-        console.log(
-          "Applicable Deductions:",
-          applicableDeductions.map((d) => d.name)
+        const recurringPayroll = await createPayslipsForPeriod(
+          periodStartDate,
+          periodEndDate,
+          periodName
         );
 
-        const extraDeductions = applicableDeductions.map((deduction) => ({
-          type: deduction.name,
-          amount:
-            deduction.type === "fixed"
-              ? deduction.amount
-              : Math.round(baseSalary * (deduction.amount / 100)),
-          description: deduction.description,
-        }));
-
-        const allDeductions = [...defaultDeductions, ...extraDeductions];
-        const totalDeductions = allDeductions.reduce(
-          (sum, d) => sum + d.amount,
-          0
-        );
-
-        // Calculate net pay
-        const netPay = grossPay - totalDeductions;
-
-        return {
-          employee: employee._id,
-          base_salary: baseSalary,
-          allowances: allAllowances,
-          deductions: allDeductions,
-          gross_pay: grossPay,
-          net_pay: netPay,
-          status: "pending",
+        // Add process date to payroll
+        recurringPayroll.schedule = {
+          process_date: processDate,
+          is_recurring: true,
         };
-      })
-    );
 
-    // Calculate payroll summary
-    const summary = payslips.reduce(
-      (acc, slip) => ({
-        total_gross: acc.total_gross + slip.gross_pay,
-        total_deductions:
-          acc.total_deductions +
-          slip.deductions.reduce((sum, d) => sum + d.amount, 0),
-        total_allowances:
-          acc.total_allowances +
-          slip.allowances.reduce((sum, a) => sum + a.amount, 0),
-        total_net: acc.total_net + slip.net_pay,
-      }),
-      {
-        total_gross: 0,
-        total_deductions: 0,
-        total_allowances: 0,
-        total_net: 0,
+        payrolls.push(recurringPayroll);
       }
-    );
+    } else {
+      // For non-recurring, just create the initial payroll
+      const initialPayroll = await createPayslipsForPeriod(
+        startDate,
+        endDate,
+        name
+      );
+      payrolls.push(initialPayroll);
+    }
 
-    // Calculate next run date based on frequency
-    const next_run = calculateNextRunDate(frequency, new Date(period_start));
+    // Save all payrolls
+    await Payroll.insertMany(payrolls, { session });
 
-    // Create the payroll
-    const payroll = await Payroll.create({
-      company: companyId,
-      name,
-      period: {
-        start_date: period_start,
-        end_date: period_end,
-      },
-      frequency,
-      status: "draft",
-      total_employees: employees.length,
-      payslips,
-      summary,
-      schedule: {
-        next_run,
-        is_recurring: !!is_recurring,
-        last_run: null,
-      },
-    });
+    await session.commitTransaction();
+    session.endSession();
 
     res.status(201).json({
-      message: "Payroll scheduled successfully",
-      payroll,
+      message: is_recurring
+        ? `Created ${payrolls.length} recurring payrolls for the year`
+        : "Payroll scheduled successfully",
+      data: {
+        payrolls: payrolls.map((p) => ({
+          id: p._id,
+          name: p.name,
+          period: p.period,
+          total_employees: p.total_employees,
+          summary: p.summary,
+        })),
+      },
     });
   } catch (error) {
-    console.error("Payroll scheduling error:", error);
+    console.error("Schedule payroll error:", error);
+    await session.abortTransaction();
+    session.endSession();
+
     res.status(500).json({
       message: "Error scheduling payroll",
       error: error.message,
@@ -621,7 +739,9 @@ exports.processPayroll = async (req, res) => {
     const payroll = await Payroll.findOne({
       _id: payrollId,
       company: companyId,
-    }).session(session);
+    })
+      .populate("company")
+      .session(session);
 
     // Check if payroll exists
     if (!payroll) {
@@ -654,6 +774,15 @@ exports.processPayroll = async (req, res) => {
     if (wallet.wallet.availableBalance < totalPayrollAmount) {
       await session.abortTransaction();
       session.endSession();
+
+      // Send low balance alert
+      await emailService.sendLowBalanceAlert({
+        adminEmail: req.user.email,
+        currentBalance: wallet.wallet.availableBalance,
+        upcomingPayroll: totalPayrollAmount,
+        walletUrl: `${process.env.FRONTEND_URL}/wallet`,
+      });
+
       return res.status(400).json({
         message: "Insufficient wallet balance",
         requiredAmount: totalPayrollAmount,
@@ -691,9 +820,6 @@ exports.processPayroll = async (req, res) => {
           session
         );
 
-        console.log(employee.bankDetails);
-
-        // Validate bank details
         if (!employee.bankDetails || !employee.bankDetails.accountNumber) {
           throw new Error(
             `No bank account details for employee ${employee.name}`
@@ -711,81 +837,451 @@ exports.processPayroll = async (req, res) => {
           metadata: {
             payrollId: payrollId,
             payslipId: payslip._id,
-            payPeriod: payroll.pay_period,
+            payPeriod: payroll.period,
           },
         };
 
-        // Perform bank transfer
+        // Process bank transfer
         const transferResult = await WalletService.transferToBank(
           transferDetails
         );
 
-        // Update payslip status
-        payslip.status = transferResult.success ? "completed" : "failed";
-        payslip.transaction = transferResult.transaction._id;
-
-        transferResults.push(transferResult);
-
         if (!transferResult.success) {
-          failedTransfers.push(transferResult);
+          throw new Error(transferResult.error || "Transfer failed");
         }
-      } catch (payslipError) {
-        console.error(
-          `Error processing payslip for employee ${payslip.employee}:`,
-          payslipError
-        );
 
-        // Mark payslip as failed
-        payslip.status = "failed";
-        payslip.error = payslipError.message;
+        // Update payslip status and add transaction reference
+        payslip.status = "completed";
+        payslip.transaction = transferResult.transaction._id;
+        payslip.payment_reference = transferResult.reference;
+        payslip.payment_date = new Date();
 
+        // Create transaction record
+        const transaction = new Transaction({
+          amount: payslip.net_pay,
+          type: "debit",
+          status: "success",
+          reference: transferResult.reference,
+          metadata: {
+            payrollId: payrollId,
+            payslipId: payslip._id,
+            employeeId: employee._id,
+            employeeName: employee.name,
+            payPeriod: payroll.period,
+          },
+        });
+        await transaction.save({ session });
+
+        transferResults.push({
+          employee: employee._id,
+          amount: payslip.net_pay,
+          status: "success",
+          reference: transferResult.reference,
+        });
+      } catch (error) {
+        console.error("Transfer failed:", error);
         failedTransfers.push({
-          employeeId: payslip.employee,
-          error: payslipError.message,
+          employee: payslip.employee,
+          amount: payslip.net_pay,
+          error: error.message,
         });
       }
     }
 
-    // Determine overall payroll status
-    payroll.status =
-      failedTransfers.length === 0
-        ? "completed"
-        : failedTransfers.length === payroll.payslips.length
-        ? "failed"
-        : "partially_completed";
+    // Update payroll status based on transfer results
+    if (failedTransfers.length === 0) {
+      // Update wallet balance
+      wallet.wallet.availableBalance -= totalPayrollAmount;
+      await wallet.save({ session });
 
-    // Update processing history
-    payroll.processing_history.push({
-      status: payroll.status,
-      message: `Payroll processing ${payroll.status}`,
-      failedTransfers: failedTransfers.length,
-      timestamp: new Date(),
-    });
+      payroll.status = "completed";
+      payroll.processing_history.push({
+        status: "completed",
+        message: "All transfers completed successfully",
+        timestamp: new Date(),
+        totalAmount: totalPayrollAmount,
+        employeeCount: payroll.payslips.length,
+      });
 
-    // Save updated payroll
+      // Send success email
+      await emailService.sendPayrollProcessedEmail({
+        adminEmail: req.user.email,
+        adminName: req.user.firstName,
+        period: payroll.period,
+        totalAmount: totalPayrollAmount,
+        employeeCount: payroll.payslips.length,
+        processDate: new Date(),
+        dashboardUrl: `${process.env.FRONTEND_URL}/payroll/${payroll._id}`,
+      });
+
+      // Send payslip emails to employees
+      for (const payslip of payroll.payslips) {
+        const employee = await Employee.findById(payslip.employee);
+        if (employee && employee.email) {
+          await emailService.sendPayslipEmail({
+            employeeEmail: employee.email,
+            employeeName: employee.name,
+            period: payroll.period,
+            netPay: payslip.net_pay,
+            payslipUrl: `${process.env.FRONTEND_URL}/payslips/${payroll._id}`,
+          });
+        }
+      }
+    } else {
+      payroll.status = "failed";
+      payroll.processing_history.push({
+        status: "failed",
+        message: `${failedTransfers.length} transfers failed`,
+        timestamp: new Date(),
+      });
+
+      // Send failure email
+      await emailService.sendPayrollFailedEmail({
+        adminEmail: req.user.email,
+        adminName: req.user.firstName,
+        period: payroll.period,
+        errorMessage: `${failedTransfers.length} transfers failed. Please check the dashboard for details.`,
+        dashboardUrl: `${process.env.FRONTEND_URL}/payroll/${payroll._id}`,
+      });
+    }
+
     await payroll.save({ session });
-
-    // Commit transaction
     await session.commitTransaction();
     session.endSession();
 
-    // Prepare response
     res.status(200).json({
-      message: "Payroll processed",
+      message: "Payroll processing completed",
       status: payroll.status,
-      totalPayslips: payroll.payslips.length,
-      successfulTransfers: transferResults.filter((r) => r.success).length,
-      failedTransfers: failedTransfers.length,
-      payroll,
+      transferResults,
+      failedTransfers,
     });
   } catch (error) {
-    // Abort transaction in case of error
+    console.error("Payroll processing error:", error);
     await session.abortTransaction();
     session.endSession();
 
-    console.error("Payroll Processing Error:", error);
+    // Send failure email for system errors
+    await emailService.sendPayrollFailedEmail({
+      adminEmail: req.user.email,
+      adminName: req.user.firstName,
+      period: payroll?.period || "current period",
+      errorMessage: `System error: ${error.message}`,
+      dashboardUrl: `${process.env.FRONTEND_URL}/payroll/${payroll?._id}`,
+    });
+
     res.status(500).json({
-      message: "Failed to process payroll",
+      message: "Error processing payroll",
+      error: error.message,
+    });
+  }
+};
+
+// Retry failed payslip transfer
+exports.retryPayslipTransfer = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const { payrollId, payslipId } = req.params;
+    const companyId = req.user.company;
+
+    // Find the payroll and specific payslip
+    const payroll = await Payroll.findOne({
+      _id: payrollId,
+      company: companyId,
+    }).session(session);
+
+    if (!payroll) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({
+        message: "Payroll not found",
+      });
+    }
+
+    const payslip = payroll.payslips.id(payslipId);
+    if (!payslip) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({
+        message: "Payslip not found",
+      });
+    }
+
+    // Check if payslip needs retry
+    if (payslip.status === "completed") {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        message: "Payslip has already been processed successfully",
+      });
+    }
+
+    // Check wallet balance
+    const wallet = await Wallet.findOne({ company: companyId }).session(
+      session
+    );
+    if (!wallet) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        message: "Company wallet not found",
+      });
+    }
+
+    // Verify sufficient balance
+    if (wallet.wallet.availableBalance < payslip.net_pay) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        message: "Insufficient wallet balance",
+        requiredAmount: payslip.net_pay,
+        currentBalance: wallet.wallet.availableBalance,
+      });
+    }
+
+    // Fetch employee details
+    const employee = await Employee.findById(payslip.employee).session(session);
+    if (!employee) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({
+        message: "Employee not found",
+      });
+    }
+
+    if (!employee.bankDetails || !employee.bankDetails.accountNumber) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        message: `No bank account details for employee ${employee.name}`,
+      });
+    }
+
+    // Prepare transfer details
+    const transferDetails = {
+      amount: payslip.net_pay,
+      sortCode: employee.bankDetails.bankCode,
+      accountNumber: employee.bankDetails.accountNumber,
+      accountName: employee.bankDetails.accountName,
+      companyId: companyId,
+      employeeId: employee._id,
+      metadata: {
+        payrollId: payrollId,
+        payslipId: payslip._id,
+        payPeriod: payroll.period,
+        retryAttempt: (payslip.retry_count || 0) + 1,
+      },
+    };
+
+    // Process bank transfer
+    const transferResult = await WalletService.transferToBank(transferDetails);
+
+    if (!transferResult.success) {
+      // Increment retry count
+      payslip.retry_count = (payslip.retry_count || 0) + 1;
+      payslip.last_retry = new Date();
+      await payroll.save({ session });
+
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        message: "Transfer failed",
+        error: transferResult.error,
+      });
+    }
+
+    // Update payslip
+    payslip.status = "completed";
+    payslip.transaction = transferResult.transaction._id;
+    payslip.payment_reference = transferResult.reference;
+    payslip.payment_date = new Date();
+    payslip.retry_count = (payslip.retry_count || 0) + 1;
+    payslip.last_retry = new Date();
+
+    // Create transaction record
+    const transaction = new Transaction({
+      amount: payslip.net_pay,
+      type: "debit",
+      status: "success",
+      reference: transferResult.reference,
+      metadata: {
+        payrollId: payrollId,
+        payslipId: payslip._id,
+        employeeId: employee._id,
+        employeeName: employee.name,
+        payPeriod: payroll.period,
+        retryAttempt: payslip.retry_count,
+      },
+    });
+    await transaction.save({ session });
+
+    // Update wallet balance
+    wallet.wallet.availableBalance -= payslip.net_pay;
+    await wallet.save({ session });
+
+    // Update payroll status if all payslips are now completed
+    const allCompleted = payroll.payslips.every(
+      (p) => p.status === "completed"
+    );
+    if (allCompleted) {
+      payroll.status = "completed";
+      payroll.processing_history.push({
+        status: "completed",
+        message: "All transfers completed successfully after retries",
+        timestamp: new Date(),
+      });
+    }
+
+    await payroll.save({ session });
+
+    // Send success notifications
+    await emailService.sendPayslipEmail({
+      employeeEmail: employee.email,
+      employeeName: employee.name,
+      period: payroll.period,
+      netPay: payslip.net_pay,
+      payslipUrl: `${process.env.FRONTEND_URL}/payslips/${payroll._id}`,
+    });
+
+    await session.commitTransaction();
+    session.endSession();
+
+    res.status(200).json({
+      message: "Transfer retry successful",
+      payslip: {
+        id: payslip._id,
+        status: payslip.status,
+        payment_reference: payslip.payment_reference,
+        retry_count: payslip.retry_count,
+      },
+    });
+  } catch (error) {
+    console.error("Payslip retry error:", error);
+    await session.abortTransaction();
+    session.endSession();
+
+    res.status(500).json({
+      message: "Error retrying payslip transfer",
+      error: error.message,
+    });
+  }
+};
+
+// Remove employee from payroll
+exports.removeEmployeeFromPayroll = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const { payrollId, employeeId } = req.params;
+    const companyId = req.user.company;
+
+    // Find the payroll
+    const payroll = await Payroll.findOne({
+      _id: payrollId,
+      company: companyId,
+    }).session(session);
+
+    if (!payroll) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({
+        message: "Payroll not found",
+      });
+    }
+
+    // Check if payroll can be modified
+    if (payroll.status !== "draft" && payroll.status !== "pending") {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        message: `Cannot modify payroll in ${payroll.status} status`,
+      });
+    }
+
+    // Find the payslip for this employee
+    const payslipIndex = payroll.payslips.findIndex(
+      (p) => p.employee.toString() === employeeId
+    );
+
+    if (payslipIndex === -1) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({
+        message: "Employee not found in this payroll",
+      });
+    }
+
+    // Get the payslip to calculate summary adjustments
+    const payslip = payroll.payslips[payslipIndex];
+
+    // Remove the payslip
+    payroll.payslips.splice(payslipIndex, 1);
+
+    // Update total employees count
+    payroll.total_employees = payroll.payslips.length;
+
+    // Recalculate payroll summary
+    const summary = payroll.payslips.reduce(
+      (acc, slip) => ({
+        total_gross: acc.total_gross + slip.gross_pay,
+        total_deductions:
+          acc.total_deductions +
+          slip.deductions.reduce((sum, d) => sum + d.amount, 0),
+        total_allowances:
+          acc.total_allowances +
+          slip.allowances.reduce((sum, a) => sum + a.amount, 0),
+        total_net: acc.total_net + slip.net_pay,
+      }),
+      {
+        total_gross: 0,
+        total_deductions: 0,
+        total_allowances: 0,
+        total_net: 0,
+      }
+    );
+
+    // Update summary
+    payroll.summary = summary;
+
+    // Save changes
+    await payroll.save({ session });
+
+    await session.commitTransaction();
+    session.endSession();
+
+    // Get employee details for the response
+
+    const employee = await Employee.findById(employeeId).select("name email");
+
+    res.status(200).json({
+      message: "Employee removed from payroll successfully",
+      data: {
+        employee: {
+          id: employeeId,
+          name: employee?.name,
+        },
+        removedPayslip: {
+          gross_pay: payslip.gross_pay,
+          net_pay: payslip.net_pay,
+          allowances: payslip.allowances.length,
+          deductions: payslip.deductions.length,
+        },
+        updatedPayroll: {
+          id: payroll._id,
+          total_employees: payroll.total_employees,
+          summary: payroll.summary,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Remove employee from payroll error:", error);
+    await session.abortTransaction();
+    session.endSession();
+
+    res.status(500).json({
+      message: "Error removing employee from payroll",
       error: error.message,
     });
   }
@@ -889,5 +1385,38 @@ exports.processPayrollOld = async (payrollData) => {
     console.log(`Payroll processed for company: ${companyId}`);
   } catch (error) {
     console.error("Error processing payroll:", error.message);
+  }
+};
+
+// Get payrolls
+exports.getPayrolls = async (req, res) => {
+  try {
+    const companyId = req.user.company;
+    const { page = 1, limit = 20 } = req.query;
+
+    const options = {
+      page: parseInt(page),
+      limit: parseInt(limit),
+      sort: { "period.start_date": 1 }, // Sort by start date in ascending order
+      populate: [
+        {
+          path: "payslips.employee",
+          select: "name email department position",
+        },
+      ],
+    };
+
+    const payrolls = await Payroll.paginate({ company: companyId }, options);
+
+    res.status(200).json({
+      message: "Payrolls retrieved successfully",
+      data: payrolls,
+    });
+  } catch (error) {
+    console.error("Get payrolls error:", error);
+    res.status(500).json({
+      message: "Error retrieving payrolls",
+      error: error.message,
+    });
   }
 };

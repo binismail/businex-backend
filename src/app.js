@@ -62,6 +62,7 @@ const extraEarningRoutes = require("./routes/payroll/extraEarning.route");
 const WalletRoute = require("./routes/wallet/wallet.route");
 const WaitlistRoute = require("./routes/waitlist.route");
 const WebhookRoutes = require("./routes/webhook.routes");
+const TaxRoutes = require("./routes/tax/tax.route");
 
 app.use("/api/v1/auth", Auth);
 app.use("/api/v1/payroll", Payroll);
@@ -76,6 +77,7 @@ app.use("/api/v1/extra-earnings", extraEarningRoutes);
 app.use("/api/v1/webhooks", WebhookRoutes);
 app.use("/api/v1/waitlist", WaitlistRoute);
 app.use("/api/v1/wallet", WalletRoute);
+app.use("/api/v1/tax", TaxRoutes);
 
 // Default route
 app.get("/", (req, res) => {

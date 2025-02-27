@@ -2,8 +2,8 @@ const User = require("../../models/user.model");
 const Company = require("../../models/company.model");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-// const { sendOtp } = require("../utils/sendOtp"); // Assume you have a function to send OTP
-const Otp = require("../../models/otp.model"); // Temporary OTP store (create otp.model.js)
+const Otp = require("../../models/otp.model");
+const emailService = require("../../utils/email");
 
 exports.accountLoginWEmail = async (req, res) => {
   try {
@@ -27,11 +27,11 @@ exports.accountLoginWEmail = async (req, res) => {
     if (!isPasswordValid) {
       return res.status(400).json({ message: "Invalid password" });
     }
-    //  Math.floor(100000 + Math.random() * 900000);
-    // Generate OTP
-    const otpCode = 200000; // 6-digit OTP
 
-    // Save OTP in database with an expiration time (e.g., 5 minutes)
+    // Generate OTP
+    const otpCode = Math.floor(100000 + Math.random() * 900000); // 6-digit OTP
+
+    // Save OTP in database with an expiration time (5 minutes)
     const otp = new Otp({
       userId: user._id,
       otpCode,
@@ -39,18 +39,22 @@ exports.accountLoginWEmail = async (req, res) => {
     });
     await otp.save();
 
-    // Send OTP to the user (via email/SMS)
-    // await sendOtp(user.email, otpCode); // Assuming sendOtp function sends OTP
+    // Send OTP via email
+    await emailService.sendOTPEmail(user.email, otpCode);
 
     res.status(200).json({
       message: "OTP sent successfully. Please verify.",
-      data: otp,
-      userId: user._id,
+      data: {
+        userId: user._id,
+        email: user.email,
+      },
     });
   } catch (error) {
-    res
-      .status(500)
-      .json({ message: "Error during login", error: error.message });
+    console.error("Login error:", error);
+    res.status(500).json({
+      message: "Error during login",
+      error: error.message,
+    });
   }
 };
 

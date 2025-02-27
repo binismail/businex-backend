@@ -1,11 +1,9 @@
-const dotenv = require("dotenv");
+require("dotenv").config();
 const app = require("./src/app");
 const logger = require("./src/utils/customLogger");
 const mongoose = require("mongoose");
 
 const port = process.env.PORT || 5555;
-/* Load environment variables into Node.js process */
-dotenv.config();
 
 // connect DB
 const MONGO_URI = process.env.MONGO_URI.replace(

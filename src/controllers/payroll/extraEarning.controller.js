@@ -236,11 +236,10 @@ exports.deleteExtraEarning = async (req, res) => {
     const { earning_id } = req.params;
     const companyId = req.user.company;
 
-    const extraEarning = await ExtraEarning.findOneAndUpdate(
-      { _id: earning_id, company: companyId },
-      { status: "inactive" },
-      { new: true }
-    );
+    const extraEarning = await ExtraEarning.findOneAndDelete({
+      _id: earning_id,
+      company: companyId
+    });
 
     if (!extraEarning) {
       return res.status(404).json({ message: "Extra earning not found" });
@@ -251,6 +250,7 @@ exports.deleteExtraEarning = async (req, res) => {
       data: extraEarning,
     });
   } catch (error) {
+    console.error("Error deleting extra earning:", error);
     res.status(500).json({
       message: "Error deleting extra earning",
       error: error.message,

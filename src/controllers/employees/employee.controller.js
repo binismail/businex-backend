@@ -1,4 +1,8 @@
 const Employee = require("../../models/employees.model");
+const User = require("../../models/user.model");
+const emailService = require("../../utils/email");
+const mongoose = require("mongoose");
+const Payroll = require("../../models/payroll.model");
 
 // Create a new employee
 exports.createEmployee = async (req, res) => {
@@ -14,28 +18,40 @@ exports.createEmployee = async (req, res) => {
       bankDetails,
     } = req.body;
 
-    const newEmployee = new Employee({
+    const companyId = req.user.company;
+    const employeeData = {
       name,
       email,
       phone,
       position,
       department,
-      company: req.user.company,
+      company: companyId,
       salary,
       tax_information,
-      bankDetails, // account details, bank, bank_code, number etc..
-    });
+      bankDetails,
+    };
 
+    const newEmployee = new Employee(employeeData);
     await newEmployee.save();
+
+    // Send welcome email to the employee
+    await emailService.sendEmployeeWelcomeEmail({
+      email: newEmployee.email,
+      employeeName: newEmployee.name,
+      companyName: req.user.companyName,
+      setupUrl: `${process.env.FRONTEND_URL}/employee/setup/${newEmployee._id}`,
+    });
 
     res.status(201).json({
       message: "Employee created successfully",
       employee: newEmployee,
     });
   } catch (error) {
-    res
-      .status(400)
-      .json({ message: "Error creating employee", error: error.message });
+    console.error("Error creating employee:", error);
+    res.status(500).json({
+      message: "Error creating employee",
+      error: error.message,
+    });
   }
 };
 
@@ -83,11 +99,24 @@ exports.createEmployees = async (req, res) => {
       ordered: false, // Continues inserting even if there are errors
     });
 
+    // Send welcome emails to the employees
+    await Promise.all(
+      createdEmployees.map((employee) =>
+        emailService.sendEmployeeWelcomeEmail({
+          email: employee.email,
+          employeeName: employee.name,
+          companyName: req.user.companyName,
+          setupUrl: `${process.env.FRONTEND_URL}/employee/setup/${employee._id}`,
+        })
+      )
+    );
+
     res.status(201).json({
       message: `Successfully created ${createdEmployees.length} employees`,
       employees: createdEmployees,
     });
   } catch (error) {
+    console.error("Error creating employees:", error);
     res.status(500).json({
       message: "Error creating employees",
       error: error.message,
@@ -220,48 +249,208 @@ exports.updateEmployee = async (req, res) => {
       email,
       phone,
       position,
+      department,
       salary,
+      status,
+      bankDetails,
+      country,
+      currency,
       tax_information,
+      employment_start_date,
       employment_end_date,
       payroll_status,
     } = req.body;
+
+    // Validate required fields if they are being updated
+    const requiredFields = [
+      "name",
+      "email",
+      "phone",
+      "position",
+      "department",
+      "salary",
+    ];
+    const missingFields = requiredFields.filter((field) => {
+      return req.body.hasOwnProperty(field) && !req.body[field];
+    });
+
+    if (missingFields.length > 0) {
+      return res.status(400).json({
+        message: "Missing required fields",
+        fields: missingFields,
+      });
+    }
+
+    // Validate email format if being updated
+    if (email && !email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) {
+      return res.status(400).json({
+        message: "Invalid email format",
+      });
+    }
+
+    // Validate payroll_status if being updated
+    if (payroll_status && !["active", "inactive"].includes(payroll_status)) {
+      return res.status(400).json({
+        message:
+          "Invalid payroll status. Must be either 'active' or 'inactive'",
+      });
+    }
+
+    // Validate status if being updated
+    if (status && !["present", "inactive", "absent"].includes(status)) {
+      return res.status(400).json({
+        message: "Invalid status. Must be one of: present, inactive, absent",
+      });
+    }
+
+    // Build update object with only provided fields
+    const updateFields = {};
+    Object.entries(req.body).forEach(([key, value]) => {
+      if (value !== undefined) {
+        updateFields[key] = value;
+      }
+    });
+
     const updatedEmployee = await Employee.findByIdAndUpdate(
       req.params.id,
+      { $set: updateFields },
       {
-        name,
-        email,
-        phone,
-        position,
-        salary,
-        tax_information,
-        employment_end_date,
-        payroll_status,
-      },
-      { new: true } // Returns the updated employee
-    );
-    if (!updatedEmployee)
+        new: true,
+        runValidators: true, // Ensures mongoose validation runs on update
+      }
+    ).populate("company", "name"); // Populate company name for email notification
+
+    if (!updatedEmployee) {
       return res.status(404).json({ message: "Employee not found" });
+    }
+
+    // Prepare changes for email notification
+    const changes = {};
+    Object.keys(updateFields).forEach((field) => {
+      if (field !== "company") {
+        // Exclude company field from notification
+        changes[field] = updatedEmployee[field];
+      }
+    });
+
+    // Send update notification email to the employee
+    // await emailService.sendEmployeeUpdateNotification({
+    //   email: updatedEmployee.email,
+    //   employeeName: updatedEmployee.name,
+    //   companyName: updatedEmployee.company.name,
+    //   changes,
+    // });
+
     res.status(200).json({
       message: "Employee updated successfully",
       employee: updatedEmployee,
     });
   } catch (error) {
-    res
-      .status(400)
-      .json({ message: "Error updating employee", error: error.message });
+    console.error("Error updating employee:", error);
+    // Check for duplicate email error
+    if (error.code === 11000) {
+      return res.status(400).json({
+        message: "Email already exists",
+        error: "Duplicate email address",
+      });
+    }
+    res.status(400).json({
+      message: "Error updating employee",
+      error: error.message,
+    });
   }
 };
 
 // Delete an employee
 exports.deleteEmployee = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
-    const deletedEmployee = await Employee.findByIdAndDelete(req.params.id);
-    if (!deletedEmployee)
+    const employeeId = req.params.id;
+    const companyId = req.user.company;
+
+    // Find the employee first to ensure they exist and belong to the company
+    const employee = await Employee.findOne({
+      _id: employeeId,
+      company: companyId,
+    }).session(session);
+
+    if (!employee) {
+      await session.abortTransaction();
+      session.endSession();
       return res.status(404).json({ message: "Employee not found" });
-    res.status(200).json({ message: "Employee deleted successfully" });
+    }
+
+    // Find all draft and pending payrolls that include this employee
+    const affectedPayrolls = await Payroll.find({
+      company: companyId,
+      status: { $in: ["draft", "pending"] },
+      "payslips.employee": employeeId,
+    }).session(session);
+
+    // Remove employee from each affected payroll and recalculate totals
+    for (const payroll of affectedPayrolls) {
+      // Find the payslip for this employee
+      const payslipIndex = payroll.payslips.findIndex(
+        (p) => p.employee.toString() === employeeId
+      );
+
+      if (payslipIndex !== -1) {
+        // Remove the payslip
+        payroll.payslips.splice(payslipIndex, 1);
+
+        // Update total employees count
+        payroll.total_employees = payroll.payslips.length;
+
+        // Recalculate payroll summary
+        const summary = payroll.payslips.reduce(
+          (acc, slip) => ({
+            total_gross: acc.total_gross + slip.gross_pay,
+            total_deductions:
+              acc.total_deductions +
+              slip.deductions.reduce((sum, d) => sum + d.amount, 0),
+            total_allowances:
+              acc.total_allowances +
+              slip.allowances.reduce((sum, a) => sum + a.amount, 0),
+            total_net: acc.total_net + slip.net_pay,
+          }),
+          {
+            total_gross: 0,
+            total_deductions: 0,
+            total_allowances: 0,
+            total_net: 0,
+          }
+        );
+
+        // Update summary
+        payroll.summary = summary;
+
+        // Save changes
+        await payroll.save({ session });
+      }
+    }
+
+    // Delete the employee
+    await Employee.findByIdAndDelete(employeeId).session(session);
+
+    await session.commitTransaction();
+    session.endSession();
+
+    res.status(200).json({
+      message: "Employee deleted successfully",
+      details: {
+        payrolls_updated: affectedPayrolls.length,
+        payroll_ids: affectedPayrolls.map((p) => p._id),
+      },
+    });
   } catch (error) {
-    res
-      .status(500)
-      .json({ message: "Error deleting employee", error: error.message });
+    console.error("Error deleting employee:", error);
+    await session.abortTransaction();
+    session.endSession();
+    res.status(500).json({
+      message: "Error deleting employee",
+      error: error.message,
+    });
   }
 };

@@ -11,9 +11,14 @@ const {
   processPayroll,
   schedulePayroll,
   getPayrollSummary,
+  retryPayslipTransfer,
+  removeEmployeeFromPayroll,
 } = require("../../controllers/payroll/payroll.controller");
+
 // router
 const router = express.Router();
+
+router.use(checkUser());
 
 router.post(
   "/createPayroll",
@@ -21,11 +26,7 @@ router.post(
   createPayroll
 );
 
-router.post(
-  "/schedule",
-  checkUser(permissionsByRole.admin),
-  schedulePayroll
-);
+router.post("/schedule", checkUser(permissionsByRole.admin), schedulePayroll);
 
 router.post(
   "/process/:payrollId",
@@ -33,30 +34,36 @@ router.post(
   processPayroll
 );
 
-router.get(
-  "/summary",
-  checkUser(permissionsByRole.admin),
-  getPayrollSummary
-);
+router.get("/summary", checkUser(permissionsByRole.admin), getPayrollSummary);
 
-router.get(
-  "/getAllPayrolls",
-  checkUser(permissionsByRole.admin),
-  getAllPayrolls
-);
+router.get("/getAllPayrolls", getAllPayrolls);
 
-router.get(
-  "/getAllPayrollsById/:id",
-  checkUser(permissionsByRole.admin),
-  getPayrollById
-);
+router.get("/getAllPayrollsById/:id", getPayrollById);
 
-router.put("/updatePayroll/:payrollId", checkUser(permissionsByRole.admin), updatePayroll);
+router.put(
+  "/updatePayroll/:payrollId",
+  checkUser(permissionsByRole.admin),
+  updatePayroll
+);
 
 router.delete(
-  "/deletePayroll",
+  "/deletePayroll/:payrollId",
   checkUser(permissionsByRole.admin),
   deletePayroll
+);
+
+// New route for retrying individual payslip transfers
+router.post(
+  "/:payrollId/payslips/:payslipId/retry",
+  checkUser(permissionsByRole.admin),
+  retryPayslipTransfer
+);
+
+// Route for removing an employee from payroll
+router.delete(
+  "/:payrollId/employees/:employeeId",
+  checkUser(permissionsByRole.admin),
+  removeEmployeeFromPayroll
 );
 
 module.exports = router;

@@ -38,13 +38,13 @@ router.get(
 );
 
 router.put(
-  "/updateEmployee",
+  "/updateEmployee/:id",
   checkUser(permissionsByRole.admin),
   updateEmployee
 );
 
 router.delete(
-  "/deleteEmployee",
+  "/deleteEmployee/:id",
   checkUser(permissionsByRole.admin),
   deleteEmployee
 );

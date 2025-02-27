@@ -45,7 +45,22 @@ const payslipSchema = new Schema({
     default: "pending"
   },
   payment_reference: String,
-  payment_date: Date
+  payment_date: Date,
+  transaction: {
+    type: Schema.Types.ObjectId,
+    ref: "Transaction"
+  },
+  retry_count: {
+    type: Number,
+    default: 0
+  },
+  last_retry: Date,
+  retry_history: [{
+    attempt: Number,
+    date: Date,
+    status: String,
+    error: String
+  }]
 });
 
 // Main payroll schema for batch processing

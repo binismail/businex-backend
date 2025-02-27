@@ -1,4 +1,5 @@
 const Waitlist = require('../models/waitlist.model');
+const emailService = require('../utils/email');
 
 // Signup for waitlist
 exports.signupWaitlist = async (req, res) => {
@@ -39,7 +40,12 @@ exports.signupWaitlist = async (req, res) => {
     // Save to database
     await waitlistEntry.save();
 
-    // Optional: Send confirmation email (you can implement this later)
+    // Send confirmation email
+    await emailService.sendWaitlistConfirmation({
+      firstName,
+      email,
+      companyName
+    });
 
     res.status(201).json({
       message: 'Successfully added to waitlist',

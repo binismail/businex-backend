@@ -2,6 +2,7 @@ const Company = require("../../../models/company.model");
 const User = require("../../../models/user.model");
 const Department = require("../../../models/department.model");
 const { seedDefaultDepartments } = require("../../../utils/defaultDepartments");
+const emailService = require("../../../utils/email");
 
 // Save onboarding step data
 exports.saveOnboardingStep = async (req, res) => {
@@ -227,7 +228,7 @@ exports.reviewKycDocuments = async (req, res) => {
     const { documentType, status, rejectionReason } = req.body;
     const reviewerId = req.user._id;
 
-    const company = await Company.findById(companyId);
+    const company = await Company.findById(companyId).populate('owner');
     if (!company) {
       return res.status(404).json({ message: "Company not found" });
     }
@@ -251,14 +252,38 @@ exports.reviewKycDocuments = async (req, res) => {
       company.kycDetails.documentVerificationStatus
     ).every((status) => status === "verified");
 
-    // Update KYC status based on verification results
+    // Update KYC status and send appropriate emails
     if (status === "rejected") {
       company.kycStatus = "rejected";
       company.kycDetails.rejectionReason = rejectionReason;
+      
+      // Send rejection email
+      await emailService.sendEmail({
+        to: company.owner.email,
+        subject: "KYC Document Verification Update",
+        text: `Your ${documentType} document was rejected. Reason: ${rejectionReason}`,
+        html: `
+          <div class="email-container">
+            <h2>Document Verification Update</h2>
+            <p>Hello ${company.owner.firstName},</p>
+            <p>Your ${documentType} document was not approved.</p>
+            <p><strong>Reason:</strong> ${rejectionReason}</p>
+            <p>Please update and resubmit your document.</p>
+            <a href="${process.env.FRONTEND_URL}/kyc" class="button">Update Documents</a>
+          </div>
+        `
+      });
     } else if (allDocumentsVerified) {
       company.kycStatus = "approved";
       company.kycDetails.approvalDate = new Date();
       company.kycDetails.rejectionReason = null;
+
+      // Send approval email
+      await emailService.sendCompanyApprovalEmail({
+        email: company.owner.email,
+        companyName: company.name,
+        dashboardUrl: `${process.env.FRONTEND_URL}/dashboard`
+      });
     }
 
     await company.save();

@@ -1,5 +1,8 @@
 const WalletService = require("../../services/walletService");
 const Company = require("../../models/company.model");
+const Wallet = require("../../models/wallet.model");
+const Transaction = require("../../models/transaction.model");
+const emailService = require("../../utils/email");
 
 exports.createCompanyWallet = async (req, res) => {
   try {
@@ -29,25 +32,35 @@ exports.createCompanyWallet = async (req, res) => {
 
 exports.getWalletBalance = async (req, res) => {
   try {
-    const { companyId } = req.params;
+    const companyId = req.user.company;
+    const wallet = await Wallet.findOne({ company: companyId });
 
-    // Verify company exists
-    const company = await Company.findById(companyId);
-    if (!company) {
-      return res.status(404).json({ message: "Company not found" });
+    if (!wallet) {
+      return res.status(404).json({ message: "Wallet not found" });
     }
 
-    // Get wallet balance
-    const balance = await WalletService.getWalletBalance(companyId);
+    // Check if balance is below threshold (e.g., if less than next payroll amount)
+    const nextPayroll = await Transaction.findOne({
+      company: companyId,
+      type: 'payroll',
+      status: 'pending'
+    }).sort({ createdAt: -1 });
 
-    res.status(200).json({
-      message: "Wallet balance retrieved",
-      balance,
-    });
+    if (nextPayroll && wallet.wallet.availableBalance < nextPayroll.amount) {
+      // Send low balance alert
+      await emailService.sendLowBalanceAlert({
+        adminEmail: req.user.email,
+        currentBalance: wallet.wallet.availableBalance,
+        upcomingPayroll: nextPayroll.amount,
+        walletUrl: `${process.env.FRONTEND_URL}/wallet`
+      });
+    }
+
+    res.status(200).json(wallet);
   } catch (error) {
-    console.error("Wallet Balance Error:", error);
+    console.error("Error getting wallet balance:", error);
     res.status(500).json({
-      message: "Failed to retrieve wallet balance",
+      message: "Error retrieving wallet balance",
       error: error.message,
     });
   }
@@ -63,6 +76,25 @@ exports.transferFunds = async (req, res) => {
       toCompanyId,
       amount
     );
+
+    // Send transfer notification
+    await emailService.sendEmail({
+      to: req.user.email,
+      subject: "Funds Transfer Successful",
+      text: `Funds have been transferred from ${fromCompanyId} to ${toCompanyId}. Amount: ${amount}`,
+      html: `
+        <div class="email-container">
+          <h2>Funds Transfer Successful</h2>
+          <p>Hello ${req.user.firstName},</p>
+          <p>Funds have been successfully transferred.</p>
+          <p><strong>From:</strong> ${fromCompanyId}</p>
+          <p><strong>To:</strong> ${toCompanyId}</p>
+          <p><strong>Amount:</strong> ${amount}</p>
+          <p><strong>Transaction Date:</strong> ${new Date().toLocaleString()}</p>
+          <a href="${process.env.FRONTEND_URL}/wallet" class="button">View Wallet</a>
+        </div>
+      `
+    });
 
     res.status(200).json({
       message: "Funds transfer successful",
@@ -113,6 +145,24 @@ exports.creditWallet = async (req, res) => {
     // Credit wallet
     const result = await WalletService.creditWallet(companyId, amount, metadata);
 
+    // Send credit notification
+    await emailService.sendEmail({
+      to: req.user.email,
+      subject: "Wallet Credited",
+      text: `Your wallet has been credited with ${amount}. New balance: ${result.wallet.availableBalance}`,
+      html: `
+        <div class="email-container">
+          <h2>Wallet Credited</h2>
+          <p>Hello ${req.user.firstName},</p>
+          <p>Your wallet has been successfully credited.</p>
+          <p><strong>Amount:</strong> ${amount}</p>
+          <p><strong>New Balance:</strong> ${result.wallet.availableBalance}</p>
+          <p><strong>Transaction Date:</strong> ${new Date().toLocaleString()}</p>
+          <a href="${process.env.FRONTEND_URL}/wallet" class="button">View Wallet</a>
+        </div>
+      `
+    });
+
     res.status(200).json({
       message: 'Wallet credited successfully',
       result
@@ -141,6 +191,24 @@ exports.debitWallet = async (req, res) => {
 
     // Debit wallet
     const result = await WalletService.debitWallet(companyId, amount, metadata);
+
+    // Send debit notification
+    await emailService.sendEmail({
+      to: req.user.email,
+      subject: "Wallet Debited",
+      text: `Your wallet has been debited with ${amount}. New balance: ${result.wallet.availableBalance}`,
+      html: `
+        <div class="email-container">
+          <h2>Wallet Debited</h2>
+          <p>Hello ${req.user.firstName},</p>
+          <p>Your wallet has been successfully debited.</p>
+          <p><strong>Amount:</strong> ${amount}</p>
+          <p><strong>New Balance:</strong> ${result.wallet.availableBalance}</p>
+          <p><strong>Transaction Date:</strong> ${new Date().toLocaleString()}</p>
+          <a href="${process.env.FRONTEND_URL}/wallet" class="button">View Wallet</a>
+        </div>
+      `
+    });
 
     res.status(200).json({
       message: 'Wallet debited successfully',
@@ -182,6 +250,48 @@ exports.getWalletAccountNumber = async (req, res) => {
     console.error("Wallet Account Number Error:", error);
     res.status(500).json({
       message: "Failed to retrieve wallet account number",
+      error: error.message,
+    });
+  }
+};
+
+// Handle failed transactions
+exports.handleFailedTransaction = async (req, res) => {
+  try {
+    const { transactionId } = req.params;
+    const transaction = await Transaction.findById(transactionId).populate('company');
+    
+    if (!transaction) {
+      return res.status(404).json({ message: "Transaction not found" });
+    }
+
+    // Send failed transaction notification
+    await emailService.sendEmail({
+      to: req.user.email,
+      subject: "Transaction Failed",
+      text: `Transaction ${transactionId} has failed. Please check your wallet dashboard for details.`,
+      html: `
+        <div class="email-container">
+          <h2>⚠️ Transaction Failed</h2>
+          <p>Hello ${req.user.firstName},</p>
+          <p>We encountered an issue with your transaction.</p>
+          <p><strong>Transaction ID:</strong> ${transactionId}</p>
+          <p><strong>Amount:</strong> ${transaction.amount}</p>
+          <p><strong>Date:</strong> ${transaction.createdAt.toLocaleString()}</p>
+          <p>Please check your wallet dashboard for more details and try again.</p>
+          <a href="${process.env.FRONTEND_URL}/wallet/transactions" class="button">View Transaction</a>
+        </div>
+      `
+    });
+
+    res.status(200).json({
+      message: "Failed transaction notification sent",
+      transaction
+    });
+  } catch (error) {
+    console.error("Error handling failed transaction:", error);
+    res.status(500).json({
+      message: "Error handling failed transaction",
       error: error.message,
     });
   }
