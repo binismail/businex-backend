@@ -553,7 +553,7 @@ exports.schedulePayroll = async (req, res) => {
         total_employees: employees.length,
         payslips,
         summary,
-        status: "pending",
+        status: "draft",
       });
 
       return payroll;
