@@ -455,9 +455,6 @@ class WalletService {
         throw new Error("Missing required transfer details");
       }
 
-      // Generate unique reference
-      const reference = `transfer_${Date.now()}_${accountNumber}`;
-
       // Prepare transfer payload
       const payload = {
         amount,
@@ -483,6 +480,9 @@ class WalletService {
           },
         }
       );
+
+      // Generate reference
+      const reference = `PAY-${payrollId}-${payslip.employee}-${Date.now()}`;
 
       // Create transaction record
       const transaction = new Transaction({

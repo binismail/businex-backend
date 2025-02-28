@@ -867,12 +867,16 @@ exports.processPayroll = async (req, res) => {
         payslip.payment_date = new Date();
         payslip.retry_count = payslip.retry_count || 0;
 
+        // Generate unique reference
+        const moreReference = `transfer_${Date.now()}_${accountNumber}`;
+        console.log(`More reference:`, moreReference);
+
         // Create transaction record
         const transaction = new Transaction({
           amount: payslip.net_pay,
           type: "debit",
           status: "successful",
-          reference: transferResult.reference,
+          reference: transferResult.reference || moreReference,
           metadata: {
             payrollId: payrollId,
             payslipId: payslip._id,
@@ -887,7 +891,7 @@ exports.processPayroll = async (req, res) => {
           employee: employee._id,
           amount: payslip.net_pay,
           status: "success",
-          reference: transferResult.reference,
+          reference: transferResult.reference || moreReference,
         });
       } catch (error) {
         console.error("Transfer failed:", error);
