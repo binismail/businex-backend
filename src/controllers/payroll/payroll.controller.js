@@ -731,6 +731,11 @@ exports.processPayroll = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
+  const newPayroll = await Payroll.findOne({
+    _id: req.params.payrollId,
+    company: req.user.company,
+  }).session(session);
+
   try {
     const { payrollId } = req.params;
     const companyId = req.user.company;
@@ -991,9 +996,9 @@ exports.processPayroll = async (req, res) => {
     await emailService.sendPayrollFailedEmail({
       adminEmail: req.user.email,
       adminName: req.user.firstName,
-      period: payroll?.period || "current period",
+      period: newPayroll?.period || "current period",
       errorMessage: `System error: ${error.message}`,
-      dashboardUrl: `${process.env.FRONTEND_URL}/payroll/${payroll?._id}`,
+      dashboardUrl: `${process.env.FRONTEND_URL}/payroll/${newPayroll?._id}`,
     });
 
     res.status(500).json({

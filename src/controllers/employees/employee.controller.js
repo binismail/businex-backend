@@ -3,6 +3,7 @@ const User = require("../../models/user.model");
 const emailService = require("../../utils/email");
 const mongoose = require("mongoose");
 const Payroll = require("../../models/payroll.model");
+const Company = require("../../models/company.model");
 
 // Create a new employee
 exports.createEmployee = async (req, res) => {
@@ -88,6 +89,8 @@ exports.createEmployees = async (req, res) => {
       });
     }
 
+    const company = await Company.findById(companyId);
+
     // Prepare employee data
     const employeesData = employees.map((employee) => ({
       ...employee,
@@ -105,7 +108,7 @@ exports.createEmployees = async (req, res) => {
         emailService.sendEmployeeWelcomeEmail({
           email: employee.email,
           employeeName: employee.name,
-          companyName: req.user.companyName,
+          companyName: company.name,
           setupUrl: `${process.env.FRONTEND_URL}/employee/setup/${employee._id}`,
         })
       )
