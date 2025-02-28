@@ -7,6 +7,9 @@ const Company = require("../../models/company.model");
 
 // Create a new employee
 exports.createEmployee = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
     const {
       name,
@@ -49,6 +52,7 @@ exports.createEmployee = async (req, res) => {
     });
   } catch (error) {
     console.error("Error creating employee:", error);
+    await session.abortTransaction();
     res.status(500).json({
       message: "Error creating employee",
       error: error.message,
@@ -58,6 +62,10 @@ exports.createEmployee = async (req, res) => {
 
 // Create multiple employees
 exports.createEmployees = async (req, res) => {
+  // Start a session for the transaction
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
     const { employees } = req.body;
     const companyId = req.user.company;
@@ -80,16 +88,25 @@ exports.createEmployees = async (req, res) => {
     // Check if any email already exists
     const existingEmails = await Employee.find({
       email: { $in: emails },
-    }).select("email");
+    })
+      .select("email")
+      .session(session);
 
     if (existingEmails.length > 0) {
+      await session.abortTransaction();
       return res.status(400).json({
         message: "Some email addresses already exist",
         emails: existingEmails.map((emp) => emp.email),
       });
     }
 
-    const company = await Company.findById(companyId);
+    const company = await Company.findById(companyId).session(session);
+    if (!company) {
+      await session.abortTransaction();
+      return res.status(404).json({
+        message: "Company not found",
+      });
+    }
 
     // Prepare employee data
     const employeesData = employees.map((employee) => ({
@@ -97,33 +114,49 @@ exports.createEmployees = async (req, res) => {
       company: companyId,
     }));
 
-    // Create all employees
+    // Create all employees within the transaction
     const createdEmployees = await Employee.insertMany(employeesData, {
-      ordered: false, // Continues inserting even if there are errors
+      session,
+      ordered: true, // Change to true to stop on first error
     });
 
-    // Send welcome emails to the employees
-    await Promise.all(
-      createdEmployees.map((employee) =>
-        emailService.sendEmployeeWelcomeEmail({
-          email: employee.email,
-          employeeName: employee.name,
-          companyName: company.name,
-          setupUrl: `${process.env.FRONTEND_URL}/employee/setup/${employee._id}`,
-        })
-      )
-    );
+    try {
+      // Send welcome emails to the employees
+      await Promise.all(
+        createdEmployees.map((employee) =>
+          emailService.sendEmployeeWelcomeEmail({
+            email: employee.email,
+            employeeName: employee.name,
+            companyName: company.name,
+            setupUrl: `${process.env.FRONTEND_URL}/employee/setup/${employee._id}`,
+          })
+        )
+      );
+    } catch (emailError) {
+      // If email sending fails, rollback the transaction
+      await session.abortTransaction();
+      throw new Error("Failed to send welcome emails: " + emailError.message);
+    }
+
+    // If everything succeeds, commit the transaction
+    await session.commitTransaction();
 
     res.status(201).json({
       message: `Successfully created ${createdEmployees.length} employees`,
       employees: createdEmployees,
     });
   } catch (error) {
+    // Rollback the transaction on any error
+    await session.abortTransaction();
+
     console.error("Error creating employees:", error);
     res.status(500).json({
       message: "Error creating employees",
       error: error.message,
     });
+  } finally {
+    // End the session
+    session.endSession();
   }
 };
 

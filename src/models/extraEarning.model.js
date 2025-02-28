@@ -79,11 +79,13 @@ extraEarningSchema.index({
 extraEarningSchema.pre("save", async function (next) {
   try {
     if (this.isModified("applications")) {
-      for (const app of this.applications) {
+      // Only validate the last application (the newly added one)
+      const newApplication = this.applications[this.applications.length - 1];
+      if (newApplication) {
         // Ensure correct model name (first letter capitalized)
         const modelName =
-          app.target_type.charAt(0).toUpperCase() +
-          app.target_type.slice(1).toLowerCase();
+          newApplication.target_type.charAt(0).toUpperCase() +
+          newApplication.target_type.slice(1).toLowerCase();
 
         // Dynamically get the correct model
         let Model;
@@ -94,9 +96,9 @@ extraEarningSchema.pre("save", async function (next) {
           throw new Error(`Invalid target type: ${modelName}`);
         }
 
-        const target = await Model.findById(app.target_id);
+        const target = await Model.findById(newApplication.target_id);
         if (!target) {
-          throw new Error(`${modelName} with ID ${app.target_id} not found`);
+          throw new Error(`${modelName} with ID ${newApplication.target_id} not found`);
         }
       }
     }
