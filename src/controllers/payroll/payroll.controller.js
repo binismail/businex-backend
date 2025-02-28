@@ -1139,7 +1139,7 @@ exports.retryPayslipTransfer = async (req, res) => {
     const transaction = new Transaction({
       amount: payslip.net_pay,
       type: "debit",
-      status: "success",
+      status: "successful",
       reference: transferResult.reference,
       metadata: {
         payrollId: payrollId,
