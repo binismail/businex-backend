@@ -11,32 +11,34 @@ class WalletService {
       return {
         success: false,
         status: error.response.status,
-        message: error.response.data.message || 'Unknown error occurred',
+        message: error.response.data.message || "Unknown error occurred",
         details: {
           apiMessage: error.response.data.message,
           apiStatus: error.response.data.status,
-          reference: error.config?.data ? JSON.parse(error.config.data).reference : null
-        }
+          reference: error.config?.data
+            ? JSON.parse(error.config.data).reference
+            : null,
+        },
       };
     } else if (error.request) {
       // The request was made but no response was received
       return {
         success: false,
-        message: 'No response received from server',
+        message: "No response received from server",
         details: {
           requestMethod: error.config?.method,
-          requestUrl: error.config?.url
-        }
+          requestUrl: error.config?.url,
+        },
       };
     } else {
       // Something happened in setting up the request
       return {
         success: false,
-        message: error.message || 'Error setting up the request',
+        message: error.message || "Error setting up the request",
         details: {
           errorName: error.name,
-          errorMessage: error.message
-        }
+          errorMessage: error.message,
+        },
       };
     }
   }
@@ -253,15 +255,18 @@ class WalletService {
 
       if (!wallet) {
         throw new Error("Wallet not found");
+        return error;
       }
 
       // Validate customer ID
       if (!wallet.wallet || !wallet.customer.id) {
         throw new Error("Invalid wallet configuration: Missing customer ID");
+        return error;
       }
 
       // Generate unique reference
-      const reference = metadata.reference || `credit_${Date.now()}_${companyId}`;
+      const reference =
+        metadata.reference || `credit_${Date.now()}_${companyId}`;
 
       // Prepare wallet credit payload
       const payload = {
@@ -317,10 +322,13 @@ class WalletService {
       } catch (apiError) {
         // Format and log the API error
         const formattedError = this.formatAxiosError(apiError);
-        
+
         // Log the error for internal tracking
-        console.error("Wallet Credit API Error:", JSON.stringify(formattedError, null, 2));
-        
+        console.error(
+          "Wallet Credit API Error:",
+          JSON.stringify(formattedError, null, 2)
+        );
+
         // Throw a more user-friendly error
         throw new Error(formattedError.message);
       }
@@ -352,7 +360,8 @@ class WalletService {
       }
 
       // Generate unique reference
-      const reference = metadata.reference || `debit_${Date.now()}_${companyId}`;
+      const reference =
+        metadata.reference || `debit_${Date.now()}_${companyId}`;
 
       // Prepare wallet debit payload
       const payload = {
@@ -411,10 +420,13 @@ class WalletService {
       } catch (apiError) {
         // Format and log the API error
         const formattedError = this.formatAxiosError(apiError);
-        
+
         // Log the error for internal tracking
-        console.error("Wallet Debit API Error:", JSON.stringify(formattedError, null, 2));
-        
+        console.error(
+          "Wallet Debit API Error:",
+          JSON.stringify(formattedError, null, 2)
+        );
+
         // Throw a more user-friendly error
         throw new Error(formattedError.message);
       }
@@ -506,6 +518,12 @@ class WalletService {
         error.response ? error.response.data : error.message
       );
 
+      // await this.creditWallet(
+      //   transferDetails.companyId,
+      //   transferDetails.amount,
+      //   transferDetails.metadata
+      // );
+
       // Create failed transaction record
       const failedTransaction = new Transaction({
         company: transferDetails.companyId,
@@ -539,14 +557,17 @@ class WalletService {
       // If wallet exists but hasn't been synced, sync it
       if (!wallet.wallet.accountNumber) {
         await this.syncWalletBalance(companyId);
-        
+
         // Reload the wallet after sync
         return await Wallet.findOne({ company: companyId });
       }
 
       return wallet;
     } catch (error) {
-      console.error(`Error getting wallet details for company ${companyId}:`, error);
+      console.error(
+        `Error getting wallet details for company ${companyId}:`,
+        error
+      );
       return null;
     }
   }

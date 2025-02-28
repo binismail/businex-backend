@@ -7,11 +7,32 @@ exports.getTaxSummary = async (req, res) => {
     const companyId = req.user.company;
     const { year, month } = req.query;
 
+    // Validate year and month
+    const currentYear = new Date().getFullYear();
+    const parsedYear = parseInt(year);
+    const parsedMonth = month ? parseInt(month) : null;
+
+    if (!parsedYear || isNaN(parsedYear) || parsedYear < 2000 || parsedYear > currentYear + 1) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid year. Please provide a valid year between 2000 and " + (currentYear + 1)
+      });
+    }
+
+    if (month && (isNaN(parsedMonth) || parsedMonth < 1 || parsedMonth > 12)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid month. Please provide a valid month between 1 and 12"
+      });
+    }
+
     // Calculate date range
-    const startDate = month
-      ? new Date(year, month - 1, 1)
-      : new Date(year, 0, 1);
-    const endDate = month ? new Date(year, month, 0) : new Date(year, 11, 31);
+    const startDate = parsedMonth
+      ? new Date(parsedYear, parsedMonth - 1, 1)
+      : new Date(parsedYear, 0, 1);
+    const endDate = parsedMonth 
+      ? new Date(parsedYear, parsedMonth, 0) 
+      : new Date(parsedYear, 11, 31);
 
     // Get all transactions within the period
     const transactions = await TaxTransaction.find({
@@ -56,8 +77,8 @@ exports.getTaxSummary = async (req, res) => {
     res.status(200).json({
       data: {
         period: {
-          year,
-          month: month || "all",
+          year: parsedYear,
+          month: parsedMonth || "all",
         },
         summary,
         transactions: transactions.map((t) => ({
@@ -84,6 +105,17 @@ exports.getEmployeeTaxHistory = async (req, res) => {
     const companyId = req.user.company;
     const { year } = req.query;
 
+    // Validate year
+    const currentYear = new Date().getFullYear();
+    const parsedYear = parseInt(year);
+
+    if (!parsedYear || isNaN(parsedYear) || parsedYear < 2000 || parsedYear > currentYear + 1) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid year. Please provide a valid year between 2000 and " + (currentYear + 1)
+      });
+    }
+
     // Verify employee belongs to company
     const employee = await Employee.findOne({
       _id: employeeId,
@@ -101,8 +133,8 @@ exports.getEmployeeTaxHistory = async (req, res) => {
       company: companyId,
       "breakdown.employee": employeeId,
       month: {
-        $gte: new Date(year, 0, 1),
-        $lte: new Date(year, 11, 31),
+        $gte: new Date(parsedYear, 0, 1),
+        $lte: new Date(parsedYear, 11, 31),
       },
     });
 
@@ -139,7 +171,7 @@ exports.getEmployeeTaxHistory = async (req, res) => {
           name: employee.name,
           tax_pid: employee.tax_pid,
         },
-        year,
+        year: parsedYear,
         total_tax_paid: totalTaxPaid,
         tax_history: taxHistory,
       },

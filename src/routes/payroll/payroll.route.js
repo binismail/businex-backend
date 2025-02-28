@@ -66,4 +66,11 @@ router.delete(
   removeEmployeeFromPayroll
 );
 
+// Reprocess failed payrolls
+// router.post(
+//   "/reprocess",
+//   [checkUser(permissionsByRole.admin), checkUser(permissionsByRole.finance)],
+//   reprocessFailedPayrolls
+// );
+
 module.exports = router;

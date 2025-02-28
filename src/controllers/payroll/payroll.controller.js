@@ -826,6 +826,11 @@ exports.processPayroll = async (req, res) => {
           );
         }
 
+        // Skip if payslip is already completed
+        if (payslip.status === "completed") {
+          continue;
+        }
+
         // Prepare transfer details
         const transferDetails = {
           amount: payslip.net_pay,
@@ -855,12 +860,13 @@ exports.processPayroll = async (req, res) => {
         payslip.transaction = transferResult.transaction._id;
         payslip.payment_reference = transferResult.reference;
         payslip.payment_date = new Date();
+        payslip.retry_count = payslip.retry_count || 0;
 
         // Create transaction record
         const transaction = new Transaction({
           amount: payslip.net_pay,
           type: "debit",
-          status: "success",
+          status: "successful",
           reference: transferResult.reference,
           metadata: {
             payrollId: payrollId,
@@ -880,10 +886,18 @@ exports.processPayroll = async (req, res) => {
         });
       } catch (error) {
         console.error("Transfer failed:", error);
+
+        // Update payslip status to failed
+        payslip.status = "failed";
+        payslip.error_message = error.message;
+        payslip.retry_count = (payslip.retry_count || 0) + 1;
+        payslip.last_retry = new Date();
+
         failedTransfers.push({
           employee: payslip.employee,
           amount: payslip.net_pay,
           error: error.message,
+          retryCount: payslip.retry_count,
         });
       }
     }
@@ -928,11 +942,24 @@ exports.processPayroll = async (req, res) => {
         }
       }
     } else {
-      payroll.status = "failed";
+      // Set payroll status to partially_completed if some transfers succeeded
+      const hasSuccessfulTransfers = payroll.payslips.some(
+        (p) => p.status === "completed"
+      );
+      payroll.status = hasSuccessfulTransfers
+        ? "partially_completed"
+        : "failed";
+
       payroll.processing_history.push({
-        status: "failed",
+        status: payroll.status,
         message: `${failedTransfers.length} transfers failed`,
         timestamp: new Date(),
+        failedTransfers: failedTransfers.map((f) => ({
+          employee: f.employee,
+          amount: f.amount,
+          error: f.error,
+          retryCount: f.retryCount,
+        })),
       });
 
       // Send failure email
