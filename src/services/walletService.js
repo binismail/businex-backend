@@ -481,6 +481,13 @@ class WalletService {
         }
       );
 
+      // Generate reference
+      const reference = Array(12)
+        .fill("")
+        .map(() => (Math.random() * 36) | 0)
+        .map((n) => (n > 9 ? String.fromCharCode(n + 55) : n.toString(10)))
+        .join("");
+
       // Create transaction record
       const transaction = new Transaction({
         company: companyId,
