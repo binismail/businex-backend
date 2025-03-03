@@ -4,6 +4,7 @@ const emailService = require("../../utils/email");
 const mongoose = require("mongoose");
 const Payroll = require("../../models/payroll.model");
 const Company = require("../../models/company.model");
+const { ObjectId } = mongoose.Types;
 
 // Create a new employee
 exports.createEmployee = async (req, res) => {
@@ -35,20 +36,41 @@ exports.createEmployee = async (req, res) => {
       bankDetails,
     };
 
+    // Check if email exists in the same company
+    const existingEmployee = await Employee.findOne({
+      email: employeeData.email.toLowerCase(),
+      company: new ObjectId(companyId),
+    });
+
+    if (existingEmployee) {
+      await session.abortTransaction();
+      return res.status(400).json({
+        message: "An employee with this email already exists in your company",
+      });
+    }
+
     const newEmployee = new Employee(employeeData);
     await newEmployee.save();
 
-    // Send welcome email to the employee
-    await emailService.sendEmployeeWelcomeEmail({
-      email: newEmployee.email,
-      employeeName: newEmployee.name,
-      companyName: req.user.companyName,
-      setupUrl: `${process.env.FRONTEND_URL}/employee/setup/${newEmployee._id}`,
-    });
+    // Try to send welcome email, but don't fail if it doesn't work
+    try {
+      await emailService.sendEmployeeWelcomeEmail({
+        email: newEmployee.email,
+        employeeName: newEmployee.name,
+        companyName: req.user.companyName,
+        setupUrl: `${process.env.FRONTEND_URL}/employee/setup/${newEmployee._id}`,
+      });
+    } catch (emailError) {
+      console.error("Email sending failed:", emailError);
+      // Continue with employee creation even if email fails
+    }
+
+    await session.commitTransaction();
 
     res.status(201).json({
       message: "Employee created successfully",
       employee: newEmployee,
+      emailStatus: "Email sending may have failed. Please check system logs.",
     });
   } catch (error) {
     console.error("Error creating employee:", error);
@@ -57,6 +79,8 @@ exports.createEmployee = async (req, res) => {
       message: "Error creating employee",
       error: error.message,
     });
+  } finally {
+    session.endSession();
   }
 };
 
@@ -88,6 +112,7 @@ exports.createEmployees = async (req, res) => {
     // Check if any email already exists
     const existingEmails = await Employee.find({
       email: { $in: emails },
+      company: new ObjectId(companyId),
     })
       .select("email")
       .session(session);
@@ -120,30 +145,33 @@ exports.createEmployees = async (req, res) => {
       ordered: true, // Change to true to stop on first error
     });
 
-    try {
-      // Send welcome emails to the employees
-      await Promise.all(
-        createdEmployees.map((employee) =>
-          emailService.sendEmployeeWelcomeEmail({
+    // Try to send welcome emails, but don't fail if they don't work
+    const emailResults = await Promise.allSettled(
+      createdEmployees.map(async (employee) => {
+        try {
+          await emailService.sendEmployeeWelcomeEmail({
             email: employee.email,
             employeeName: employee.name,
             companyName: company.name,
             setupUrl: `${process.env.FRONTEND_URL}/employee/setup/${employee._id}`,
-          })
-        )
-      );
-    } catch (emailError) {
-      // If email sending fails, rollback the transaction
-      await session.abortTransaction();
-      throw new Error("Failed to send welcome emails: " + emailError.message);
-    }
+          });
+          return { email: employee.email, status: 'sent' };
+        } catch (error) {
+          return { email: employee.email, status: 'failed', error: error.message };
+        }
+      })
+    );
 
-    // If everything succeeds, commit the transaction
     await session.commitTransaction();
 
     res.status(201).json({
       message: `Successfully created ${createdEmployees.length} employees`,
       employees: createdEmployees,
+      emailResults: emailResults.map(result => ({
+        email: result.value?.email,
+        status: result.value?.status || 'failed',
+        error: result.value?.error
+      }))
     });
   } catch (error) {
     // Rollback the transaction on any error
@@ -266,7 +294,14 @@ exports.getAllEmployees = async (req, res) => {
 // Get a single employee by ID
 exports.getEmployeeById = async (req, res) => {
   try {
-    const employee = await Employee.findById(req.params.id);
+    const employeeId = req.params.id;
+    const companyId = req.user.company;
+
+    const employee = await Employee.findOne({
+      _id: new ObjectId(employeeId),
+      company: companyId,
+    });
+
     if (!employee)
       return res.status(404).json({ message: "Employee not found" });
     res.status(200).json(employee);
@@ -337,6 +372,21 @@ exports.updateEmployee = async (req, res) => {
       return res.status(400).json({
         message: "Invalid status. Must be one of: present, inactive, absent",
       });
+    }
+
+    // If email is being updated, check for uniqueness within company
+    if (email) {
+      const existingEmployee = await Employee.findOne({
+        _id: { $ne: new ObjectId(req.params.id) }, // Exclude current employee
+        email: email.toLowerCase(),
+        company: req.user.company,
+      });
+
+      if (existingEmployee) {
+        return res.status(400).json({
+          message: "An employee with this email already exists in your company",
+        });
+      }
     }
 
     // Build update object with only provided fields

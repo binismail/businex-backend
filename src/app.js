@@ -63,6 +63,7 @@ const WalletRoute = require("./routes/wallet/wallet.route");
 const WaitlistRoute = require("./routes/waitlist.route");
 const WebhookRoutes = require("./routes/webhook.routes");
 const TaxRoutes = require("./routes/tax/tax.route");
+const RoleRoutes = require("./routes/roles/role.route");
 
 app.use("/api/v1/auth", Auth);
 app.use("/api/v1/payroll", Payroll);
@@ -78,6 +79,7 @@ app.use("/api/v1/webhooks", WebhookRoutes);
 app.use("/api/v1/waitlist", WaitlistRoute);
 app.use("/api/v1/wallet", WalletRoute);
 app.use("/api/v1/tax", TaxRoutes);
+app.use("/api/v1/roles", RoleRoutes);
 
 // Default route
 app.get("/", (req, res) => {

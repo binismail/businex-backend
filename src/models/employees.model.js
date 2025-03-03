@@ -16,7 +16,6 @@ const employeeSchema = new Schema(
     email: {
       type: String,
       required: true,
-      unique: true,
       lowercase: true,
       trim: true,
     },
@@ -74,6 +73,18 @@ const employeeSchema = new Schema(
   },
   {
     timestamps: true,
+  }
+);
+
+// Remove the global unique index on email
+employeeSchema.index({ email: 1 }, { unique: false });
+
+// Add compound unique index for email within company
+employeeSchema.index(
+  { email: 1, company: 1 },
+  { 
+    unique: true,
+    collation: { locale: 'en', strength: 2 } // Case-insensitive
   }
 );
 
