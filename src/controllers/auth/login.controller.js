@@ -34,7 +34,9 @@ exports.accountLoginWEmail = async (req, res) => {
     // Save OTP in database with an expiration time (5 minutes)
     const otp = new Otp({
       userId: user._id,
+      email: user.email,
       otpCode,
+      purpose: "email_verification",
       expiresAt: Date.now() + 5 * 60 * 1000, // 5 minutes from now
     });
     await otp.save();
@@ -60,45 +62,66 @@ exports.accountLoginWEmail = async (req, res) => {
 
 exports.verifyOtp = async (req, res) => {
   try {
-    const { userId, otpCode } = req.body;
+    const { userId, email, otpCode } = req.body;
 
     // Validate inputs
-    if (!userId || !otpCode) {
-      return res.status(400).json({ message: "User ID and OTP are required" });
+    if ((!userId && !email) || !otpCode) {
+      return res.status(400).json({ 
+        message: "Either User ID or email, and OTP are required" 
+      });
     }
 
     // Find the OTP record
-    const otpRecord = await Otp.findOne({ userId, otpCode });
+    const query = {
+      otpCode,
+      isUsed: false,
+      expiresAt: { $gt: new Date() }
+    };
+
+    // Add either userId or email to query based on what's provided
+    if (userId) {
+      query.userId = userId;
+      query.purpose = "email_verification";
+    } else if (email) {
+      query.email = email.toLowerCase();
+      query.purpose = "password_reset";
+    }
+
+    const otpRecord = await Otp.findOne(query);
     if (!otpRecord) {
-      return res.status(400).json({ message: "Invalid OTP" });
+      return res.status(400).json({ message: "Invalid or expired OTP" });
     }
 
-    // Check if OTP is expired
-    if (otpRecord.expiresAt < Date.now()) {
-      return res.status(400).json({ message: "OTP has expired" });
+    // Mark OTP as used
+    otpRecord.isUsed = true;
+    await otpRecord.save();
+
+    // Handle based on OTP purpose
+    if (otpRecord.purpose === "email_verification") {
+      // For login verification
+      const user = await User.findById(userId, "-password");
+      const token = jwt.sign(
+        { userId: user._id, email: user.email },
+        process.env.JWT_SECRET,
+        { expiresIn: "1h" }
+      );
+
+      return res.status(200).json({
+        message: "OTP verified successfully",
+        data: { token, user },
+      });
+    } else {
+      // For password reset verification
+      return res.status(200).json({
+        message: "OTP verified successfully",
+        verified: true,
+      });
     }
-
-    // If OTP is valid, generate JWT token
-    const user = await User.findById(userId, "-password");
-    // const company = await Company.findById(user?.company?.id);
-    const token = jwt.sign(
-      { userId: user._id, email: user.email },
-      process.env.JWT_SECRET,
-      {
-        expiresIn: "1h",
-      }
-    );
-
-    // Delete OTP after verification
-    await Otp.findByIdAndDelete(otpRecord._id);
-
-    res.status(200).json({
-      message: "OTP verified successfully",
-      data: { token, user },
-    });
   } catch (error) {
-    res
-      .status(500)
-      .json({ message: "Error verifying OTP", error: error.message });
+    console.error("Error verifying OTP:", error);
+    res.status(500).json({ 
+      message: "Error verifying OTP", 
+      error: error.message 
+    });
   }
 };
