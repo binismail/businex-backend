@@ -1456,3 +1456,226 @@ exports.getPayrolls = async (req, res) => {
     });
   }
 };
+
+// Retry bulk payslip transfer
+exports.retryBulkPayslipTransfer = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const { payrollId, payslipIds } = req.body;
+    const companyId = req.user.company;
+
+    if (!Array.isArray(payslipIds) || payslipIds.length === 0) {
+      return res.status(400).json({
+        message: "Please provide an array of payslip IDs to retry",
+      });
+    }
+
+    // Find the payroll
+    const payroll = await Payroll.findOne({
+      _id: payrollId,
+      company: companyId,
+    }).session(session);
+
+    if (!payroll) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({
+        message: "Payroll not found",
+      });
+    }
+
+    // Check wallet balance
+    const wallet = await Wallet.findOne({ company: companyId }).session(
+      session
+    );
+    if (!wallet) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        message: "Company wallet not found",
+      });
+    }
+
+    // Calculate total amount needed
+    const payslipsToProcess = payroll.payslips.filter(
+      (p) => payslipIds.includes(p._id.toString()) && p.status !== "completed"
+    );
+
+    if (payslipsToProcess.length === 0) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        message: "No valid payslips found to retry",
+      });
+    }
+
+    const totalAmount = payslipsToProcess.reduce(
+      (sum, p) => sum + p.net_pay,
+      0
+    );
+
+    // Verify sufficient balance
+    if (wallet.wallet.availableBalance < totalAmount) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        message: "Insufficient wallet balance for bulk retry",
+        requiredAmount: totalAmount,
+        currentBalance: wallet.wallet.availableBalance,
+      });
+    }
+
+    const results = {
+      successful: [],
+      failed: [],
+    };
+
+    // Process each payslip
+    for (const payslip of payslipsToProcess) {
+      try {
+        // Fetch employee details
+        const employee = await Employee.findById(payslip.employee).session(
+          session
+        );
+        if (
+          !employee ||
+          !employee.bankDetails ||
+          !employee.bankDetails.accountNumber
+        ) {
+          results.failed.push({
+            payslipId: payslip._id,
+            error: `Invalid or missing bank details for employee ${
+              employee?.name || payslip.employee
+            }`,
+          });
+          continue;
+        }
+
+        // Prepare transfer details
+        const transferDetails = {
+          amount: payslip.net_pay,
+          sortCode: employee.bankDetails.bankCode,
+          accountNumber: employee.bankDetails.accountNumber,
+          accountName: employee.bankDetails.accountName,
+          companyId: companyId,
+          employeeId: employee._id,
+          metadata: {
+            payrollId: payrollId,
+            payslipId: payslip._id,
+            payPeriod: payroll.period,
+            retryAttempt: (payslip.retry_count || 0) + 1,
+          },
+        };
+
+        // Process bank transfer
+        const transferResult = await WalletService.transferToBank(
+          transferDetails
+        );
+
+        if (!transferResult.success) {
+          // Increment retry count but mark as failed
+          payslip.retry_count = (payslip.retry_count || 0) + 1;
+          payslip.last_retry = new Date();
+          results.failed.push({
+            payslipId: payslip._id,
+            error: transferResult.error,
+          });
+          continue;
+        }
+
+        // Update payslip on success
+        payslip.status = "completed";
+        payslip.transaction = transferResult.transaction._id;
+        payslip.payment_reference = transferResult.reference;
+        payslip.payment_date = new Date();
+        payslip.retry_count = (payslip.retry_count || 0) + 1;
+        payslip.last_retry = new Date();
+
+        // Create transaction record
+        const transaction = new Transaction({
+          amount: payslip.net_pay,
+          type: "debit",
+          status: "successful",
+          reference: transferResult.reference,
+          metadata: {
+            payrollId: payrollId,
+            payslipId: payslip._id,
+            employeeId: employee._id,
+            employeeName: employee.name,
+            payPeriod: payroll.period,
+            retryAttempt: payslip.retry_count,
+          },
+        });
+        await transaction.save({ session });
+
+        // Update wallet balance
+        wallet.wallet.availableBalance -= payslip.net_pay;
+        await wallet.save({ session });
+
+        // Send success notification
+        try {
+          await emailService.sendPayslipEmail({
+            employeeEmail: employee.email,
+            employeeName: employee.name,
+            period: payroll.period,
+            netPay: payslip.net_pay,
+            payslipUrl: `${process.env.FRONTEND_URL}/payslips/${payroll._id}`,
+          });
+        } catch (emailError) {
+          console.error("Failed to send payslip email:", emailError);
+        }
+
+        results.successful.push({
+          payslipId: payslip._id,
+          status: "completed",
+          payment_reference: payslip.payment_reference,
+          retry_count: payslip.retry_count,
+        });
+      } catch (error) {
+        console.error(`Error processing payslip ${payslip._id}:`, error);
+        results.failed.push({
+          payslipId: payslip._id,
+          error: error.message,
+        });
+      }
+    }
+
+    // Update payroll status if all payslips are now completed
+    const allCompleted = payroll.payslips.every(
+      (p) => p.status === "completed"
+    );
+    if (allCompleted) {
+      payroll.status = "completed";
+      payroll.processing_history.push({
+        status: "completed",
+        message: "All transfers completed successfully after bulk retry",
+        timestamp: new Date(),
+      });
+    }
+
+    await payroll.save({ session });
+    await session.commitTransaction();
+    session.endSession();
+
+    res.status(200).json({
+      message: "Bulk transfer retry completed",
+      summary: {
+        total: payslipsToProcess.length,
+        successful: results.successful.length,
+        failed: results.failed.length,
+      },
+      results,
+    });
+  } catch (error) {
+    console.error("Bulk payslip retry error:", error);
+    await session.abortTransaction();
+    session.endSession();
+
+    res.status(500).json({
+      message: "Error processing bulk payslip retry",
+      error: error.message,
+    });
+  }
+};

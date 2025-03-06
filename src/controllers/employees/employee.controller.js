@@ -20,6 +20,8 @@ exports.createEmployee = async (req, res) => {
       department,
       salary,
       tax_information,
+      stateOfResidence,
+      contractType,
       bankDetails,
     } = req.body;
 
@@ -34,6 +36,8 @@ exports.createEmployee = async (req, res) => {
       salary,
       tax_information,
       bankDetails,
+      stateOfResidence,
+      contractType,
     };
 
     // Check if email exists in the same company
@@ -155,9 +159,13 @@ exports.createEmployees = async (req, res) => {
             companyName: company.name,
             setupUrl: `${process.env.FRONTEND_URL}/employee/setup/${employee._id}`,
           });
-          return { email: employee.email, status: 'sent' };
+          return { email: employee.email, status: "sent" };
         } catch (error) {
-          return { email: employee.email, status: 'failed', error: error.message };
+          return {
+            email: employee.email,
+            status: "failed",
+            error: error.message,
+          };
         }
       })
     );
@@ -167,11 +175,11 @@ exports.createEmployees = async (req, res) => {
     res.status(201).json({
       message: `Successfully created ${createdEmployees.length} employees`,
       employees: createdEmployees,
-      emailResults: emailResults.map(result => ({
+      emailResults: emailResults.map((result) => ({
         email: result.value?.email,
-        status: result.value?.status || 'failed',
-        error: result.value?.error
-      }))
+        status: result.value?.status || "failed",
+        error: result.value?.error,
+      })),
     });
   } catch (error) {
     // Rollback the transaction on any error

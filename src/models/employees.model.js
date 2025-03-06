@@ -40,6 +40,11 @@ const employeeSchema = new Schema(
       ref: "Company",
       required: true,
     },
+    contractType: {
+      type: String,
+      default: "full-time",
+      enum: ["full-time", "part-time", "contract", "temporary"],
+    },
     bankDetails: {
       accountNumber: String,
       accountName: String,
@@ -49,6 +54,10 @@ const employeeSchema = new Schema(
     country: {
       type: String,
       default: "NIGERIA",
+    },
+    stateOfResidence: {
+      type: String,
+      default: null,
     },
     currency: {
       type: String,
@@ -82,9 +91,9 @@ employeeSchema.index({ email: 1 }, { unique: false });
 // Add compound unique index for email within company
 employeeSchema.index(
   { email: 1, company: 1 },
-  { 
+  {
     unique: true,
-    collation: { locale: 'en', strength: 2 } // Case-insensitive
+    collation: { locale: "en", strength: 2 }, // Case-insensitive
   }
 );
 

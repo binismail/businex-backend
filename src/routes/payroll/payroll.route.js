@@ -13,6 +13,7 @@ const {
   getPayrollSummary,
   retryPayslipTransfer,
   removeEmployeeFromPayroll,
+  retryBulkPayslipTransfer,
 } = require("../../controllers/payroll/payroll.controller");
 
 // router
@@ -66,11 +67,11 @@ router.delete(
   removeEmployeeFromPayroll
 );
 
-// Reprocess failed payrolls
-// router.post(
-//   "/reprocess",
-//   [checkUser(permissionsByRole.admin), checkUser(permissionsByRole.finance)],
-//   reprocessFailedPayrolls
-// );
+// Retry failed payslips in bulk
+router.post(
+  "/retry-bulk-payslips",
+  checkUser(permissionsByRole.admin),
+  retryBulkPayslipTransfer
+);
 
 module.exports = router;
