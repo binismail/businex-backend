@@ -51,6 +51,7 @@ class EmailService {
         process.env.MAILGUN_DOMAIN,
         messageData
       );
+      console.log("Email sent successfully:", response);
       return response;
     } catch (error) {
       console.error("Email sending failed:", error);
@@ -66,31 +67,50 @@ class EmailService {
   }
 
   // Authentication Emails
-  async sendOTPEmail(email, otp) {
+  async sendOTPEmail(email, otp, userName) {
+    const templateData = {
+      otp,
+      userName,
+      email,
+    };
     return this.sendEmail({
       to: email,
-      subject: "Your Verification Code",
-      text: `Your verification code is: ${otp}`,
-      html: templates.otpVerification(otp),
+      subject: "Your OTP Code for Secure Access",
+      text: `Dear ${
+        userName || "User"
+      }, Your one-time password (OTP) for secure access to BusineX is: ${otp}`,
+      html: templates.otpVerification(templateData),
     });
   }
 
   // Company Onboarding Emails
   async sendOnboardingReviewEmail(companyData) {
+    const templateData = {
+      userName: companyData.adminName || companyData.contactName,
+      companyName: companyData.companyName,
+      dashboardUrl: `${process.env.FRONTEND_URL}/dashboard`,
+      email: companyData.email,
+    };
     return this.sendEmail({
       to: companyData.email,
-      subject: "Onboarding Under Review",
-      text: `Hello ${companyData.companyName}, Your onboarding documents are under review.`,
-      html: templates.onboardingReview(companyData),
+      subject: "Your Onboarding is Under Review",
+      text: `Dear ${templateData.userName}, Thank you for completing your onboarding process with BusineX. Your details are currently under review.`,
+      html: templates.onboardingReview(templateData),
     });
   }
 
   async sendCompanyApprovalEmail(companyData) {
+    const templateData = {
+      userName: companyData.adminName || companyData.contactName,
+      companyName: companyData.companyName,
+      dashboardUrl: `${process.env.FRONTEND_URL}/dashboard`,
+      email: companyData.email,
+    };
     return this.sendEmail({
       to: companyData.email,
-      subject: "Welcome to BusineX! Company Approved",
-      text: `Congratulations! Your company ${companyData.companyName} has been approved.`,
-      html: templates.companyApproved(companyData),
+      subject: "Congratulations! Your Company is Now Approved",
+      text: `Dear ${templateData.userName}, We are pleased to inform you that your company, ${companyData.companyName}, has been successfully approved on BusineX.`,
+      html: templates.companyApproved(templateData),
     });
   }
 
@@ -124,21 +144,37 @@ class EmailService {
 
   // Employee Emails
   async sendEmployeeWelcomeEmail(employeeData) {
+    const templateData = {
+      userName: employeeData.firstName + " " + employeeData.lastName,
+      employeeName: employeeData.firstName + " " + employeeData.lastName,
+      companyName: employeeData.companyName,
+      setupUrl: `${process.env.FRONTEND_URL}/employee/setup/${employeeData.setupToken}`,
+      hrEmail: employeeData.hrEmail || "support@businex.com",
+      email: employeeData.email,
+    };
     return this.sendEmail({
       to: employeeData.email,
-      subject: `Welcome to ${employeeData.companyName}`,
-      text: `Welcome to ${employeeData.companyName}! Please complete your profile setup.`,
-      html: templates.employeeCreated(employeeData),
+      subject: `Welcome to BusineX! Your Employee Profile is Set Up`,
+      text: `Dear ${templateData.userName}, Welcome to ${employeeData.companyName}! You have been successfully added to your company's HR system on BusineX.`,
+      html: templates.employeeCreated(templateData),
     });
   }
 
   // Wallet Emails
   async sendLowBalanceAlert(walletData) {
+    const templateData = {
+      adminName: walletData.adminName,
+      payrollPeriod: walletData.payrollPeriod,
+      currentBalance: walletData.currentBalance,
+      upcomingPayroll: walletData.upcomingPayroll,
+      walletUrl: `${process.env.FRONTEND_URL}/wallet/fund`,
+      adminEmail: walletData.adminEmail,
+    };
     return this.sendEmail({
       to: walletData.adminEmail,
-      subject: "Low Wallet Balance Alert",
-      text: `Your wallet balance is running low. Current balance: ${walletData.currentBalance}`,
-      html: templates.lowWalletBalance(walletData),
+      subject: "Action Required: Insufficient Account Balance for Payroll",
+      text: `Dear ${templateData.adminName}, We encountered an issue while processing payroll for ${templateData.payrollPeriod} due to insufficient funds in your designated account.`,
+      html: templates.lowWalletBalance(templateData),
     });
   }
 

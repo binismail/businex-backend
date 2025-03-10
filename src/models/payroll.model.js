@@ -82,12 +82,12 @@ const payrollSchema = new Schema(
       },
       end_date: {
         type: Date,
-        required: true
+        required: false
       }
     },
     frequency: {
       type: String,
-      enum: ["weekly", "bi-weekly", "monthly"],
+      enum: ["weekly", "bi-weekly", "monthly", "one-off"],
       required: true
     },
     status: {

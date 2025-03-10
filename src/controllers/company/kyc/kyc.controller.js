@@ -282,7 +282,8 @@ exports.reviewKycDocuments = async (req, res) => {
       await emailService.sendCompanyApprovalEmail({
         email: company.owner.email,
         companyName: company.name,
-        dashboardUrl: `${process.env.FRONTEND_URL}/dashboard`
+        adminName: company.owner.name,
+        contactName: company.owner.name
       });
     }
 

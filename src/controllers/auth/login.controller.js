@@ -42,7 +42,7 @@ exports.accountLoginWEmail = async (req, res) => {
     await otp.save();
 
     // Send OTP via email
-    await emailService.sendOTPEmail(user.email, otpCode);
+    await emailService.sendOTPEmail(user.email, otpCode, user.name);
 
     res.status(200).json({
       message: "OTP sent successfully. Please verify.",

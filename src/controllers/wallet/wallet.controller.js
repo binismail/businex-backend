@@ -47,11 +47,19 @@ exports.getWalletBalance = async (req, res) => {
     }).sort({ createdAt: -1 });
 
     if (nextPayroll && wallet.wallet.availableBalance < nextPayroll.amount) {
+      // Get company admin details
+      const company = await Company.findById(companyId).populate('admin');
+      if (!company) {
+        throw new Error('Company not found');
+      }
+
       // Send low balance alert
       await emailService.sendLowBalanceAlert({
         adminEmail: req.user.email,
+        adminName: company.admin.name,
         currentBalance: wallet.wallet.availableBalance,
         upcomingPayroll: nextPayroll.amount,
+        payrollPeriod: nextPayroll.period || 'upcoming payroll',
         walletUrl: `${process.env.FRONTEND_URL}/wallet`
       });
     }

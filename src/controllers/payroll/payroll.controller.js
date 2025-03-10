@@ -178,7 +178,7 @@ exports.getPayrollById = async (req, res) => {
 exports.updatePayroll = async (req, res) => {
   try {
     const { payrollId } = req.params;
-    const { status, name, period, payslips } = req.body;
+    const { status, name, period, payslips, frequency } = req.body;
     const companyId = req.user.company;
 
     // Find the payroll and ensure it belongs to the company
@@ -212,6 +212,7 @@ exports.updatePayroll = async (req, res) => {
       }
 
       payroll.status = status;
+
       // Map main status to processing history status
       const processingHistoryStatusMap = {
         draft: "started",
@@ -230,9 +231,101 @@ exports.updatePayroll = async (req, res) => {
 
     // Optional updates
     if (name) payroll.name = name;
-    if (period) {
-      if (period.start_date) payroll.period.start_date = period.start_date;
-      if (period.end_date) payroll.period.end_date = period.end_date;
+    
+    // Handle frequency and period updates
+    if (frequency || (period && period.start_date)) {
+      if (frequency) payroll.frequency = frequency;
+      
+      // If we have a new start date, update both start and end dates based on frequency
+      if (period && period.start_date) {
+        try {
+          // Clean up the date string by removing any duplicate timezone markers
+          const cleanDateStr = period.start_date.toString().replace(/Z.*$/, 'Z');
+          const startDate = new Date(cleanDateStr);
+          
+          if (isNaN(startDate.getTime())) {
+            return res.status(400).json({
+              message: 'Invalid date format for period_start. Please use ISO date format (YYYY-MM-DD)',
+              receivedDate: period.start_date
+            });
+          }
+
+          // Set time to start of day
+          startDate.setUTCHours(0, 0, 0, 0);
+          payroll.period.start_date = startDate;
+          
+          // Update schedule based on new start date and frequency
+          if (!payroll.schedule) {
+            payroll.schedule = {};
+          }
+
+          // For recurring payrolls, next_run is the next occurrence based on frequency
+          if (payroll.schedule.is_recurring) {
+            const now = new Date();
+            let nextRun = new Date(startDate);
+
+            // If the start date is in the past, calculate the next occurrence
+            if (nextRun < now) {
+              switch (payroll.frequency) {
+                case 'monthly':
+                  // Move to next month until we find a future date
+                  while (nextRun < now) {
+                    nextRun.setUTCMonth(nextRun.getUTCMonth() + 1);
+                  }
+                  break;
+                case 'bi-weekly':
+                  // Move forward 14 days until we find a future date
+                  while (nextRun < now) {
+                    nextRun.setUTCDate(nextRun.getUTCDate() + 14);
+                  }
+                  break;
+                case 'weekly':
+                  // Move forward 7 days until we find a future date
+                  while (nextRun < now) {
+                    nextRun.setUTCDate(nextRun.getUTCDate() + 7);
+                  }
+                  break;
+              }
+            }
+            payroll.schedule.next_run = nextRun;
+          } else {
+            // For non-recurring payrolls, next_run is simply the start date
+            payroll.schedule.next_run = new Date(startDate);
+          }
+          
+          // Calculate end date based on frequency
+          const endDate = new Date(startDate);
+          switch (payroll.frequency) {
+            case 'monthly':
+              // End date is last day of the month
+              endDate.setUTCMonth(endDate.getUTCMonth() + 1, 0);
+              endDate.setUTCHours(23, 59, 59, 999);
+              break;
+            case 'bi-weekly':
+              // End date is start date + 13 days
+              endDate.setUTCDate(endDate.getUTCDate() + 13);
+              endDate.setUTCHours(23, 59, 59, 999);
+              break;
+            case 'weekly':
+              // End date is start date + 6 days
+              endDate.setUTCDate(endDate.getUTCDate() + 6);
+              endDate.setUTCHours(23, 59, 59, 999);
+              break;
+            case 'one-off':
+              // For one-off, end date is same as start date
+              endDate.setUTCHours(23, 59, 59, 999);
+              break;
+          }
+          payroll.period.end_date = endDate;
+        } catch (error) {
+          console.error('Error parsing date:', error);
+          return res.status(400).json({
+            message: 'Error processing date',
+            error: error.message,
+            receivedDate: period.start_date
+          });
+        }
+      }
     }
 
     // Optionally update specific payslips if provided
@@ -356,9 +449,16 @@ exports.schedulePayroll = async (req, res) => {
   session.startTransaction();
 
   try {
-    const { name, frequency, period_start, period_end, is_recurring } =
-      req.body;
+    const { name, frequency, period_start, is_recurring } = req.body;
     const companyId = req.user.company;
+
+    // Validate frequency
+    if (!["weekly", "bi-weekly", "monthly", "one-off"].includes(frequency)) {
+      return res.status(400).json({
+        message:
+          "Invalid frequency. Must be one of: weekly, bi-weekly, monthly, or one-off",
+      });
+    }
 
     // Get all active employees for the company
     const employees = await Employee.find({
@@ -449,7 +549,10 @@ exports.schedulePayroll = async (req, res) => {
           const grossPay = baseSalary + totalAllowances;
 
           // Calculate deductions
-          const tax = calculateTax(grossPay).monthlyTax;
+          let tax = 0;
+          if (employee.stateOfResidence?.toLowerCase() === 'lagos') {
+            tax = calculateTax(grossPay).monthlyTax;
+          }
           const pension = Math.round(baseSalary * 0.08);
 
           const defaultDeductions = [
@@ -457,6 +560,7 @@ exports.schedulePayroll = async (req, res) => {
               type: "tax",
               amount: Math.round(tax),
               description: "PAYE Tax",
+              isLagosTax: employee.stateOfResidence?.toLowerCase() === 'lagos'
             },
             {
               type: "pension",
@@ -560,71 +664,78 @@ exports.schedulePayroll = async (req, res) => {
     };
 
     const payrolls = [];
-    const startDate = new Date(period_start);
-    const endDate = new Date(period_end);
-    const currentYear = startDate.getFullYear();
-    const startMonth = startDate.getMonth();
-    const paymentDay = startDate.getDate();
+    const payDate = new Date(period_start);
+    const currentYear = payDate.getFullYear();
+    const startMonth = payDate.getMonth();
+    const paymentDay = payDate.getDate();
 
-    // If recurring, create payrolls for all months including current month
-    if (is_recurring) {
-      // Create payrolls for current month through December in chronological order
+    // Calculate period dates based on frequency
+    const calculatePeriodDates = (baseDate) => {
+      const periodStart = new Date(baseDate);
+      const periodEnd = new Date(baseDate);
+
+      switch (frequency) {
+        case "monthly":
+          // Period is the full month
+          periodStart.setDate(1);
+          periodEnd.setMonth(periodEnd.getMonth() + 1);
+          periodEnd.setDate(0); // Last day of the month
+          break;
+        case "bi-weekly":
+          // Two-week period ending on the pay date
+          periodStart.setDate(periodStart.getDate() - 13);
+          break;
+        case "weekly":
+          // One-week period ending on the pay date
+          periodStart.setDate(periodStart.getDate() - 6);
+          break;
+        case "one-off":
+          // For one-off, period is same as pay date
+          break;
+      }
+      return { periodStart, periodEnd };
+    };
+
+    if (is_recurring && frequency !== "one-off") {
+      // Create recurring payrolls through December
       for (let month = startMonth; month < 12; month++) {
-        // For monthly payroll, period should be entire month
-        let periodStartDate = new Date(currentYear, month, 1); // First day of month
-        let periodEndDate = new Date(currentYear, month + 1, 0); // Last day of month
-        let processDate = new Date(currentYear, month, paymentDay); // Payment/process date
+        const processDate = new Date(currentYear, month, paymentDay);
+        const { periodStart, periodEnd } = calculatePeriodDates(processDate);
 
-        // For the first month, respect the start date provided
-        if (month === startMonth) {
-          periodStartDate = new Date(startDate);
-        }
-
-        // If it's not monthly frequency, adjust the periods
-        if (frequency === "bi-weekly") {
-          // Two-week period starting from payment day
-          periodStartDate =
-            month === startMonth
-              ? new Date(startDate)
-              : new Date(currentYear, month, paymentDay);
-          periodEndDate = new Date(periodStartDate);
-          periodEndDate.setDate(periodStartDate.getDate() + 13);
-        } else if (frequency === "weekly") {
-          // One-week period starting from payment day
-          periodStartDate =
-            month === startMonth
-              ? new Date(startDate)
-              : new Date(currentYear, month, paymentDay);
-          periodEndDate = new Date(periodStartDate);
-          periodEndDate.setDate(periodStartDate.getDate() + 6);
-        }
-
-        const monthName = periodStartDate.toLocaleString("default", {
+        const monthName = processDate.toLocaleString("default", {
           month: "long",
         });
         const periodName = `${name} - ${monthName} ${currentYear}`;
 
         const recurringPayroll = await createPayslipsForPeriod(
-          periodStartDate,
-          periodEndDate,
+          periodStart,
+          periodEnd,
           periodName
         );
 
-        // Add process date to payroll
+        // Add schedule info
         recurringPayroll.schedule = {
-          process_date: processDate,
+          next_run: processDate,
           is_recurring: true,
         };
 
         payrolls.push(recurringPayroll);
       }
     } else {
-      // For non-recurring, just create the initial payroll
+      // For one-off or non-recurring payrolls
+      const { periodStart, periodEnd } = calculatePeriodDates(payDate);
       const initialPayroll = await createPayslipsForPeriod(
-        startDate,
-        endDate,
+        periodStart,
+        periodEnd,
         name
       );
+
+      // Add schedule info
+      initialPayroll.schedule = {
+        next_run: payDate,
+        is_recurring: false,
+      };
+
       payrolls.push(initialPayroll);
     }
 
@@ -769,14 +880,53 @@ exports.processPayroll = async (req, res) => {
       });
     }
 
-    // Calculate total payroll amount
-    const totalPayrollAmount = payroll.payslips.reduce(
-      (total, payslip) => total + payslip.net_pay,
-      0
-    );
+    // Calculate total payroll amount and consolidate Lagos taxes
+    let totalPayrollAmount = 0;
+    const lagosTaxes = [];
+    
+    for (const payslip of payroll.payslips) {
+      totalPayrollAmount += payslip.net_pay;
+      
+      // Find Lagos tax deduction if any
+      const lagosTaxDeduction = payslip.deductions.find(d => d.type === 'tax' && d.isLagosTax);
+      if (lagosTaxDeduction) {
+        const employee = await Employee.findById(payslip.employee)
+          .select('name tax_pid')
+          .session(session);
 
-    // Check if wallet has sufficient balance
-    if (wallet.wallet.availableBalance < totalPayrollAmount) {
+        lagosTaxes.push({
+          employee: payslip.employee,
+          pid: employee.tax_pid,
+          amount: lagosTaxDeduction.amount,
+          status: 'pending'
+        });
+      }
+    }
+
+    // Create tax transaction if there are Lagos taxes
+    let taxTransaction = null;
+    const totalTaxAmount = lagosTaxes.reduce((sum, tax) => sum + tax.amount, 0);
+    
+    if (lagosTaxes.length > 0) {
+      taxTransaction = new TaxTransaction({
+        company: companyId,
+        payroll: payroll._id,
+        month: payroll.period.start_date,
+        total_amount: totalTaxAmount,
+        status: 'pending',
+        breakdown: lagosTaxes,
+        processing_history: [{
+          status: 'pending',
+          message: 'Tax transaction created during payroll processing',
+          timestamp: new Date()
+        }]
+      });
+      await taxTransaction.save({ session });
+    }
+
+    // Check if wallet has sufficient balance for both payroll and tax
+    const totalRequiredAmount = totalPayrollAmount + (totalTaxAmount || 0);
+    if (wallet.wallet.availableBalance < totalRequiredAmount) {
       await session.abortTransaction();
       session.endSession();
 
@@ -784,13 +934,17 @@ exports.processPayroll = async (req, res) => {
       await emailService.sendLowBalanceAlert({
         adminEmail: req.user.email,
         currentBalance: wallet.wallet.availableBalance,
-        upcomingPayroll: totalPayrollAmount,
+        upcomingPayroll: totalRequiredAmount,
         walletUrl: `${process.env.FRONTEND_URL}/wallet`,
       });
 
       return res.status(400).json({
         message: "Insufficient wallet balance",
-        requiredAmount: totalPayrollAmount,
+        requiredAmount: totalRequiredAmount,
+        breakdown: {
+          payroll: totalPayrollAmount,
+          tax: totalTaxAmount || 0
+        },
         currentBalance: wallet.wallet.availableBalance,
       });
     }
@@ -913,11 +1067,17 @@ exports.processPayroll = async (req, res) => {
 
     // Update payroll status based on transfer results
     if (failedTransfers.length === 0) {
-      // Update wallet balance
-      wallet.wallet.availableBalance -= totalPayrollAmount;
+      // Update wallet balance for both payroll and tax
+      wallet.wallet.availableBalance -= totalRequiredAmount;
       await wallet.save({ session });
 
       payroll.status = "completed";
+      
+      // Add tax transaction ID to payroll metadata if exists
+      if (taxTransaction) {
+        payroll.metadata = payroll.metadata || {};
+        payroll.metadata.taxTransactionId = taxTransaction._id;
+      }
       payroll.processing_history.push({
         status: "completed",
         message: "All transfers completed successfully",

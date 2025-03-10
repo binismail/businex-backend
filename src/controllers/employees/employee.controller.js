@@ -56,13 +56,21 @@ exports.createEmployee = async (req, res) => {
     const newEmployee = new Employee(employeeData);
     await newEmployee.save();
 
+    // Get company admin's email for HR contact
+    const company = await Company.findById(companyId).populate('admin');
+    if (!company) {
+      throw new Error('Company not found');
+    }
+
     // Try to send welcome email, but don't fail if it doesn't work
     try {
       await emailService.sendEmployeeWelcomeEmail({
         email: newEmployee.email,
-        employeeName: newEmployee.name,
-        companyName: req.user.companyName,
+        firstName: newEmployee.name.split(' ')[0],
+        lastName: newEmployee.name.split(' ').slice(1).join(' '),
+        companyName: company.name,
         setupUrl: `${process.env.FRONTEND_URL}/employee/setup/${newEmployee._id}`,
+        hrEmail: company.admin.email
       });
     } catch (emailError) {
       console.error("Email sending failed:", emailError);
@@ -155,9 +163,11 @@ exports.createEmployees = async (req, res) => {
         try {
           await emailService.sendEmployeeWelcomeEmail({
             email: employee.email,
-            employeeName: employee.name,
+            firstName: employee.name.split(' ')[0],
+            lastName: employee.name.split(' ').slice(1).join(' '),
             companyName: company.name,
             setupUrl: `${process.env.FRONTEND_URL}/employee/setup/${employee._id}`,
+            hrEmail: company.admin.email
           });
           return { email: employee.email, status: "sent" };
         } catch (error) {
