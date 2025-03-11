@@ -1013,6 +1013,9 @@ exports.processPayroll = async (req, res) => {
           },
         };
 
+        console.log("Transfer details:", transferDetails);
+        console.log("Wallet:", wallet.customer.id);
+
         // Process bank transfer
         const transferResult = await WalletService.transferToBank(
           transferDetails
@@ -1270,6 +1273,7 @@ exports.retryPayslipTransfer = async (req, res) => {
       accountName: employee.bankDetails.accountName,
       companyId: companyId,
       employeeId: employee._id,
+      customerId: wallet.customer.id,
       metadata: {
         payrollId: payrollId,
         payslipId: payslip._id,
@@ -1729,6 +1733,7 @@ exports.retryBulkPayslipTransfer = async (req, res) => {
           accountName: employee.bankDetails.accountName,
           companyId: companyId,
           employeeId: employee._id,
+          customerId: wallet.customer.id,
           metadata: {
             payrollId: payrollId,
             payslipId: payslip._id,

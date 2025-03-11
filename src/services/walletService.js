@@ -454,6 +454,8 @@ class WalletService {
         metadata = {},
       } = transferDetails;
 
+      console.log(transferDetails);
+
       if (!amount || !sortCode || !accountNumber || !accountName) {
         throw new Error("Missing required transfer details");
       }
