@@ -248,7 +248,7 @@ exports.reviewKycDocuments = async (req, res) => {
     }
 
     const company = await Company.findById(companyId)
-      .populate("owner")
+      .populate("owner", null, null, { strictPopulate: false })
       .session(session);
 
     if (!company) {
