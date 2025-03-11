@@ -13,7 +13,7 @@ const router = express.Router();
 
 // Onboarding routes
 router.post(
-  "/onboarding/save-step",
+  "/onboarding/step",
   checkUser(permissionsByRole.admin),
   saveOnboardingStep
 );
