@@ -33,7 +33,7 @@ router.post(
 // KYC review route
 router.post(
   "/:companyId/kyc/review",
-  checkUser(permissionsByRole.admin),
+  // checkUser(permissionsByRole.admin),
   [
     param("companyId").isMongoId(),
     body("documentType").isString().notEmpty(),
