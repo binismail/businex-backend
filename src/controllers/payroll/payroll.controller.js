@@ -1005,12 +1005,12 @@ exports.processPayroll = async (req, res) => {
           accountName: employee.bankDetails.accountName,
           companyId: companyId,
           employeeId: employee._id,
+          customerId: wallet.customer.id,
           metadata: {
             payrollId: payrollId,
             payslipId: payslip._id,
             payPeriod: payroll.period,
           },
-          customerId: wallet.customer.id,
         };
 
         // Process bank transfer

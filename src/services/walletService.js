@@ -475,7 +475,7 @@ class WalletService {
 
       // Perform bank transfer via Xpress Wallet
       const response = await axios.post(
-        "https://payment.xpress-wallet.com/api/v1/transfer/bank",
+        "https://payment.xpress-wallet.com/api/v1/transfer/bank/customer",
         payload,
         {
           headers: {
