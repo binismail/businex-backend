@@ -97,7 +97,7 @@ const companySchema = new Schema(
     },
     kycStatus: {
       type: String,
-      enum: ["pending", "in_review", "verified", "rejected"],
+      enum: ["pending", "in_review", "approved", "rejected"],
       default: "pending",
     },
     wallet: {
