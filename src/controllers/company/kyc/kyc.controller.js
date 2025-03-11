@@ -3,6 +3,7 @@ const User = require("../../../models/user.model");
 const Department = require("../../../models/department.model");
 const { seedDefaultDepartments } = require("../../../utils/defaultDepartments");
 const emailService = require("../../../utils/email");
+const WalletService = require("../../../services/walletService");
 
 // Save onboarding step data
 exports.saveOnboardingStep = async (req, res) => {
@@ -223,80 +224,110 @@ exports.completeOnboarding = async (req, res) => {
 
 // Review KYC documents
 exports.reviewKycDocuments = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
     const { companyId } = req.params;
     const { documentType, status, rejectionReason } = req.body;
     const reviewerId = req.user._id;
 
-    const company = await Company.findById(companyId).populate('owner');
+    // Validate inputs
+    const allowedStatuses = ["pending", "verified", "rejected"];
+    const allowedDocTypes = ["cac", "cacForm", "memart", "taxClearance"];
+
+    if (!allowedStatuses.includes(status)) {
+      return res.status(400).json({ message: "Invalid status value" });
+    }
+    if (!allowedDocTypes.includes(documentType)) {
+      return res.status(400).json({ message: "Invalid document type" });
+    }
+    if (status === "rejected" && !rejectionReason) {
+      return res.status(400).json({ message: "Rejection reason is required" });
+    }
+
+    const company = await Company.findById(companyId)
+      .populate("owner")
+      .session(session);
+
     if (!company) {
+      await session.abortTransaction();
+      session.endSession();
       return res.status(404).json({ message: "Company not found" });
     }
 
-    // Update document verification status
-    if (
-      company.kycDetails &&
-      company.kycDetails.documentVerificationStatus[documentType] !== undefined
-    ) {
-      company.kycDetails.documentVerificationStatus[documentType] = status;
-    }
+    // Initialize KYC details if not exists
+    company.kycDetails = company.kycDetails || {
+      documentVerificationStatus: {},
+      lastCheckedAt: null,
+      reviewedBy: null,
+      reviewedAt: null,
+      rejectionReason: null,
+      approvalDate: null,
+    };
 
-    // Update review details
-    company.kycDetails = company.kycDetails || {};
+    // Update document status
+    company.kycDetails.documentVerificationStatus[documentType] = status;
     company.kycDetails.lastCheckedAt = new Date();
     company.kycDetails.reviewedBy = reviewerId;
     company.kycDetails.reviewedAt = new Date();
 
-    // Check if all documents are verified
-    const allDocumentsVerified = Object.values(
-      company.kycDetails.documentVerificationStatus
-    ).every((status) => status === "verified");
+    // Determine overall KYC status
+    const documentStatuses = Object.values(company.kycDetails.documentVerificationStatus);
+    const hasRejected = documentStatuses.includes("rejected");
+    const allVerified = documentStatuses.length === allowedDocTypes.length && 
+                       documentStatuses.every(s => s === "verified");
 
-    // Update KYC status and send appropriate emails
-    if (status === "rejected") {
+    // Update company KYC status
+    if (hasRejected) {
       company.kycStatus = "rejected";
       company.kycDetails.rejectionReason = rejectionReason;
-      
-      // Send rejection email
+
       await emailService.sendEmail({
         to: company.owner.email,
         subject: "KYC Document Verification Update",
         text: `Your ${documentType} document was rejected. Reason: ${rejectionReason}`,
-        html: `
-          <div class="email-container">
-            <h2>Document Verification Update</h2>
-            <p>Hello ${company.owner.firstName},</p>
-            <p>Your ${documentType} document was not approved.</p>
-            <p><strong>Reason:</strong> ${rejectionReason}</p>
-            <p>Please update and resubmit your document.</p>
-            <a href="${process.env.FRONTEND_URL}/kyc" class="button">Update Documents</a>
-          </div>
-        `
+        html: templates.kycDocumentRejected({
+          userName: company.owner.firstName,
+          documentType,
+          rejectionReason,
+          kycUrl: `${process.env.FRONTEND_URL}/kyc`
+        })
       });
-    } else if (allDocumentsVerified) {
+    } else if (allVerified) {
       company.kycStatus = "approved";
       company.kycDetails.approvalDate = new Date();
       company.kycDetails.rejectionReason = null;
 
-      // Send approval email
+      // Create wallet for approved company
+      await WalletService.createWalletForCompany(company._id, session);
+
       await emailService.sendCompanyApprovalEmail({
         email: company.owner.email,
         companyName: company.name,
         adminName: company.owner.name,
         contactName: company.owner.name
       });
+    } else {
+      company.kycStatus = "in_review";
     }
 
-    await company.save();
+    await company.save({ session });
+    await session.commitTransaction();
+    session.endSession();
 
     res.status(200).json({
       message: `Document ${documentType} ${status} successfully`,
-      company,
+      company
     });
   } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+
+    console.error("KYC review error:", error);
     res.status(500).json({
       message: "Error reviewing KYC document",
-      error: error.message,
+      error: error.message
     });
   }
 };

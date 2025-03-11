@@ -54,7 +54,9 @@ class WalletService {
 
       // Prepare wallet creation payload
       const payload = {
-        bvn: Math.floor(10000000000 + Math.random() * 90000000000).toString(),
+        bvn:
+          company.directors.bvn ||
+          Math.floor(10000000000 + Math.random() * 90000000000).toString(),
         firstName: company.name.split(" ")[0],
         lastName: company.name.split(" ").slice(1).join(" "),
         phoneNumber: company.phone || "08000000000",

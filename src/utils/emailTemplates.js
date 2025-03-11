@@ -428,7 +428,7 @@ const templates = {
           <p style="margin-top: 20px; font-size: 12px;">Need assistance? Contact our support team at support@businex.com</p>
         </div>
         <div class="footer">
-          <p>© ${new Date().getFullYear()} BusineX. All rights reserved.</p>
+          <p> 2024 BusineX. All rights reserved.</p>
           <p style="margin-top: 10px;">This is an automated email. Please do not reply.</p>
         </div>
       </div>
@@ -442,7 +442,7 @@ const templates = {
     <head>
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>⚠️ Payroll Processing Failed - Action Required</title>
+      <title> Payroll Processing Failed - Action Required</title>
       <style>
         * {
           margin: 0;
@@ -542,7 +542,7 @@ const templates = {
           position: relative;
         }
         .action-steps li:before {
-          content: '✓';
+          content: ' ';
           position: absolute;
           left: 0;
           color: #2E7D32;
@@ -563,7 +563,7 @@ const templates = {
           <div class="logo">BusineX</div>
         </div>
         <div class="content">
-          <h2>⚠️ Payroll Processing Failed</h2>
+          <h2> Payroll Processing Failed</h2>
           <p>Hello ${data.adminName},</p>
           <p>We encountered an issue while attempting to process the payroll for ${
             data.period
@@ -613,12 +613,12 @@ const templates = {
           
           <p style="margin-top: 20px;">Need immediate assistance? Our support team is available to help:</p>
           <ul style="list-style: none; padding: 0;">
-            <li>📧 Email: support@businex.com</li>
-            <li>📞 Phone: +234 XXX XXX XXXX</li>
+            <li> Email: support@businex.com</li>
+            <li> Phone: +234 XXX XXX XXXX</li>
           </ul>
         </div>
         <div class="footer">
-          <p>© ${new Date().getFullYear()} BusineX. All rights reserved.</p>
+          <p> 2024 BusineX. All rights reserved.</p>
           <p style="margin-top: 10px;">This is an automated email. Please do not reply.</p>
         </div>
       </div>
@@ -793,7 +793,7 @@ const templates = {
           <p style="margin-top: 20px; font-size: 12px;">If you have any questions about your payslip, please contact your HR department or reach out to our support team at support@businex.com</p>
         </div>
         <div class="footer">
-          <p>© ${new Date().getFullYear()} BusineX. All rights reserved.</p>
+          <p> 2024 BusineX. All rights reserved.</p>
           <p style="margin-top: 10px;">This is an automated email. Please do not reply.</p>
         </div>
       </div>
@@ -907,7 +907,7 @@ const templates = {
     <head>
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>⚠️ Low Wallet Balance Alert</title>
+      <title> Low Wallet Balance Alert</title>
       <style>
         * {
           margin: 0;
@@ -1006,7 +1006,7 @@ const templates = {
     <head>
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>Welcome to BusineX Waitlist! 🎉</title>
+      <title>Welcome to BusineX Waitlist! </title>
       <style>
         * {
           margin: 0;
@@ -1059,7 +1059,7 @@ const templates = {
           <div class="logo">BusineX</div>
         </div>
         <div class="content">
-          <h2>Welcome to BusineX Waitlist! 🎉</h2>
+          <h2>Welcome to BusineX Waitlist! </h2>
           <p>Hello ${data.firstName},</p>
           <p>Thank you for your interest in BusineX. We've added you to our waitlist and will notify you as soon as we're ready to onboard your company.</p>
           <p><strong>Your Details:</strong></p>
@@ -1068,6 +1068,91 @@ const templates = {
             <li>Email: ${data.email}</li>
           </ul>
           <p>We're working hard to provide you with the best payroll management experience.</p>
+        </div>
+        <div class="footer">
+          <p> 2024 BusineX. All rights reserved.</p>
+        </div>
+      </div>
+    </body>
+    </html>
+  `,
+
+  kycDocumentRejected: (data) => `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Document Verification Update</title>
+      <style>
+        * {
+          margin: 0;
+          padding: 0;
+          box-sizing: border-box;
+        }
+        body {
+          font-family: Arial, sans-serif;
+          line-height: 1.6;
+          background-color: #f4f4f4;
+        }
+        .email-container {
+          max-width: 600px;
+          margin: 0 auto;
+          background-color: #ffffff;
+        }
+        .header {
+          background-color: #004D40;
+          padding: 20px;
+          text-align: center;
+        }
+        .logo {
+          color: white;
+          font-size: 24px;
+          font-weight: bold;
+        }
+        .content {
+          padding: 30px 20px;
+        }
+        .footer {
+          padding: 20px;
+          text-align: center;
+          font-size: 12px;
+          color: #666666;
+          background-color: #f9f9f9;
+        }
+        .button {
+          display: inline-block;
+          padding: 12px 24px;
+          background-color: #004D40;
+          color: white !important;
+          text-decoration: none;
+          border-radius: 4px;
+          margin: 20px 0;
+          text-align: center;
+        }
+        h2 {
+          color: #333333;
+          margin-bottom: 20px;
+        }
+        p {
+          margin-bottom: 15px;
+          color: #555555;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="email-container">
+        <div class="header">
+          <div class="logo">BusineX</div>
+        </div>
+        <div class="content">
+          <h2>Document Verification Update</h2>
+          <p>Dear ${data.userName},</p>
+          <p>Your ${data.documentType} document was not approved.</p>
+          <p><strong>Reason:</strong> ${data.rejectionReason}</p>
+          <p>Please update and resubmit your document.</p>
+          <a href="${data.kycUrl}" class="button">Update Documents</a>
+          <p style="margin-top: 20px;">If you need assistance, please contact our support team.</p>
         </div>
         <div class="footer">
           <p> 2024 BusineX. All rights reserved.</p>
