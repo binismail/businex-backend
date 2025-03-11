@@ -4,6 +4,7 @@ const Department = require("../../../models/department.model");
 const { seedDefaultDepartments } = require("../../../utils/defaultDepartments");
 const emailService = require("../../../utils/email");
 const WalletService = require("../../../services/walletService");
+const { default: mongoose } = require("mongoose");
 
 // Save onboarding step data
 exports.saveOnboardingStep = async (req, res) => {
@@ -273,10 +274,13 @@ exports.reviewKycDocuments = async (req, res) => {
     company.kycDetails.reviewedAt = new Date();
 
     // Determine overall KYC status
-    const documentStatuses = Object.values(company.kycDetails.documentVerificationStatus);
+    const documentStatuses = Object.values(
+      company.kycDetails.documentVerificationStatus
+    );
     const hasRejected = documentStatuses.includes("rejected");
-    const allVerified = documentStatuses.length === allowedDocTypes.length && 
-                       documentStatuses.every(s => s === "verified");
+    const allVerified =
+      documentStatuses.length === allowedDocTypes.length &&
+      documentStatuses.every((s) => s === "verified");
 
     // Update company KYC status
     if (hasRejected) {
@@ -291,8 +295,8 @@ exports.reviewKycDocuments = async (req, res) => {
           userName: company.owner.firstName,
           documentType,
           rejectionReason,
-          kycUrl: `${process.env.FRONTEND_URL}/kyc`
-        })
+          kycUrl: `${process.env.FRONTEND_URL}/kyc`,
+        }),
       });
     } else if (allVerified) {
       company.kycStatus = "approved";
@@ -306,7 +310,7 @@ exports.reviewKycDocuments = async (req, res) => {
         email: company.owner.email,
         companyName: company.name,
         adminName: company.owner.name,
-        contactName: company.owner.name
+        contactName: company.owner.name,
       });
     } else {
       company.kycStatus = "in_review";
@@ -318,7 +322,7 @@ exports.reviewKycDocuments = async (req, res) => {
 
     res.status(200).json({
       message: `Document ${documentType} ${status} successfully`,
-      company
+      company,
     });
   } catch (error) {
     await session.abortTransaction();
@@ -327,7 +331,7 @@ exports.reviewKycDocuments = async (req, res) => {
     console.error("KYC review error:", error);
     res.status(500).json({
       message: "Error reviewing KYC document",
-      error: error.message
+      error: error.message,
     });
   }
 };
