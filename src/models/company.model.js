@@ -97,12 +97,12 @@ const companySchema = new Schema(
     },
     kycStatus: {
       type: String,
-      enum: ["pending", "in_review", "approved", "rejected"],
+      enum: ["pending", "in_review", "verified", "rejected"],
       default: "pending",
     },
     wallet: {
       type: Schema.Types.ObjectId,
-      ref: 'Wallet'
+      ref: "Wallet",
     },
     kycDetails: {
       reviewedAt: { type: Date },
