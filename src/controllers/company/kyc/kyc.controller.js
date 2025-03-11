@@ -270,7 +270,7 @@ exports.reviewKycDocuments = async (req, res) => {
     // Update document status
     company.kycDetails.documentVerificationStatus[documentType] = status;
     company.kycDetails.lastCheckedAt = new Date();
-    company.kycDetails.reviewedBy = "reviewerId";
+    company.kycDetails.reviewedBy = "67d03be473eff506a8dea860";
     company.kycDetails.reviewedAt = new Date();
 
     // Determine overall KYC status
