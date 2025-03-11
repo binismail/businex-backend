@@ -1,6 +1,7 @@
 const express = require("express");
-const { checkUser } = require("../../middleware/auth");
-const { permissionsByRole } = require("../../utils/permissions");
+const { checkUser } = require("../../middlewares/auth.middleware");
+const permissionsByRole = require("../../utils/permission.enum");
+const { body, param } = require("express-validator");
 const {
   saveOnboardingStep,
   getOnboardingProgress,
@@ -14,10 +15,6 @@ const router = express.Router();
 router.post(
   "/onboarding/save-step",
   checkUser(permissionsByRole.admin),
-  [
-    body("step").isNumeric(),
-    body("data").isObject(),
-  ],
   saveOnboardingStep
 );
 
@@ -36,7 +33,7 @@ router.post(
 // KYC review route
 router.post(
   "/:companyId/kyc/review",
-  checkUser(permissionsByRole.superAdmin),
+  checkUser(permissionsByRole.admin),
   [
     param("companyId").isMongoId(),
     body("documentType").isString().notEmpty(),
