@@ -231,29 +231,32 @@ exports.updatePayroll = async (req, res) => {
 
     // Optional updates
     if (name) payroll.name = name;
-    
+
     // Handle frequency and period updates
     if (frequency || (period && period.start_date)) {
       if (frequency) payroll.frequency = frequency;
-      
+
       // If we have a new start date, update both start and end dates based on frequency
       if (period && period.start_date) {
         try {
           // Clean up the date string by removing any duplicate timezone markers
-          const cleanDateStr = period.start_date.toString().replace(/Z.*$/, 'Z');
+          const cleanDateStr = period.start_date
+            .toString()
+            .replace(/Z.*$/, "Z");
           const startDate = new Date(cleanDateStr);
-          
+
           if (isNaN(startDate.getTime())) {
             return res.status(400).json({
-              message: 'Invalid date format for period_start. Please use ISO date format (YYYY-MM-DD)',
-              receivedDate: period.start_date
+              message:
+                "Invalid date format for period_start. Please use ISO date format (YYYY-MM-DD)",
+              receivedDate: period.start_date,
             });
           }
 
           // Set time to start of day
           startDate.setUTCHours(0, 0, 0, 0);
           payroll.period.start_date = startDate;
-          
+
           // Update schedule based on new start date and frequency
           if (!payroll.schedule) {
             payroll.schedule = {};
@@ -267,19 +270,19 @@ exports.updatePayroll = async (req, res) => {
             // If the start date is in the past, calculate the next occurrence
             if (nextRun < now) {
               switch (payroll.frequency) {
-                case 'monthly':
+                case "monthly":
                   // Move to next month until we find a future date
                   while (nextRun < now) {
                     nextRun.setUTCMonth(nextRun.getUTCMonth() + 1);
                   }
                   break;
-                case 'bi-weekly':
+                case "bi-weekly":
                   // Move forward 14 days until we find a future date
                   while (nextRun < now) {
                     nextRun.setUTCDate(nextRun.getUTCDate() + 14);
                   }
                   break;
-                case 'weekly':
+                case "weekly":
                   // Move forward 7 days until we find a future date
                   while (nextRun < now) {
                     nextRun.setUTCDate(nextRun.getUTCDate() + 7);
@@ -292,37 +295,37 @@ exports.updatePayroll = async (req, res) => {
             // For non-recurring payrolls, next_run is simply the start date
             payroll.schedule.next_run = new Date(startDate);
           }
-          
+
           // Calculate end date based on frequency
           const endDate = new Date(startDate);
           switch (payroll.frequency) {
-            case 'monthly':
+            case "monthly":
               // End date is last day of the month
               endDate.setUTCMonth(endDate.getUTCMonth() + 1, 0);
               endDate.setUTCHours(23, 59, 59, 999);
               break;
-            case 'bi-weekly':
+            case "bi-weekly":
               // End date is start date + 13 days
               endDate.setUTCDate(endDate.getUTCDate() + 13);
               endDate.setUTCHours(23, 59, 59, 999);
               break;
-            case 'weekly':
+            case "weekly":
               // End date is start date + 6 days
               endDate.setUTCDate(endDate.getUTCDate() + 6);
               endDate.setUTCHours(23, 59, 59, 999);
               break;
-            case 'one-off':
+            case "one-off":
               // For one-off, end date is same as start date
               endDate.setUTCHours(23, 59, 59, 999);
               break;
           }
           payroll.period.end_date = endDate;
         } catch (error) {
-          console.error('Error parsing date:', error);
+          console.error("Error parsing date:", error);
           return res.status(400).json({
-            message: 'Error processing date',
+            message: "Error processing date",
             error: error.message,
-            receivedDate: period.start_date
+            receivedDate: period.start_date,
           });
         }
       }
@@ -550,7 +553,7 @@ exports.schedulePayroll = async (req, res) => {
 
           // Calculate deductions
           let tax = 0;
-          if (employee.stateOfResidence?.toLowerCase() === 'lagos') {
+          if (employee.stateOfResidence?.toLowerCase() === "lagos") {
             tax = calculateTax(grossPay).monthlyTax;
           }
           const pension = Math.round(baseSalary * 0.08);
@@ -560,7 +563,7 @@ exports.schedulePayroll = async (req, res) => {
               type: "tax",
               amount: Math.round(tax),
               description: "PAYE Tax",
-              isLagosTax: employee.stateOfResidence?.toLowerCase() === 'lagos'
+              isLagosTax: employee.stateOfResidence?.toLowerCase() === "lagos",
             },
             {
               type: "pension",
@@ -883,22 +886,24 @@ exports.processPayroll = async (req, res) => {
     // Calculate total payroll amount and consolidate Lagos taxes
     let totalPayrollAmount = 0;
     const lagosTaxes = [];
-    
+
     for (const payslip of payroll.payslips) {
       totalPayrollAmount += payslip.net_pay;
-      
+
       // Find Lagos tax deduction if any
-      const lagosTaxDeduction = payslip.deductions.find(d => d.type === 'tax' && d.isLagosTax);
+      const lagosTaxDeduction = payslip.deductions.find(
+        (d) => d.type === "tax" && d.isLagosTax
+      );
       if (lagosTaxDeduction) {
         const employee = await Employee.findById(payslip.employee)
-          .select('name tax_pid')
+          .select("name tax_pid")
           .session(session);
 
         lagosTaxes.push({
           employee: payslip.employee,
           pid: employee.tax_pid,
           amount: lagosTaxDeduction.amount,
-          status: 'pending'
+          status: "pending",
         });
       }
     }
@@ -906,20 +911,22 @@ exports.processPayroll = async (req, res) => {
     // Create tax transaction if there are Lagos taxes
     let taxTransaction = null;
     const totalTaxAmount = lagosTaxes.reduce((sum, tax) => sum + tax.amount, 0);
-    
+
     if (lagosTaxes.length > 0) {
       taxTransaction = new TaxTransaction({
         company: companyId,
         payroll: payroll._id,
         month: payroll.period.start_date,
         total_amount: totalTaxAmount,
-        status: 'pending',
+        status: "pending",
         breakdown: lagosTaxes,
-        processing_history: [{
-          status: 'pending',
-          message: 'Tax transaction created during payroll processing',
-          timestamp: new Date()
-        }]
+        processing_history: [
+          {
+            status: "pending",
+            message: "Tax transaction created during payroll processing",
+            timestamp: new Date(),
+          },
+        ],
       });
       await taxTransaction.save({ session });
     }
@@ -943,7 +950,7 @@ exports.processPayroll = async (req, res) => {
         requiredAmount: totalRequiredAmount,
         breakdown: {
           payroll: totalPayrollAmount,
-          tax: totalTaxAmount || 0
+          tax: totalTaxAmount || 0,
         },
         currentBalance: wallet.wallet.availableBalance,
       });
@@ -1003,6 +1010,7 @@ exports.processPayroll = async (req, res) => {
             payslipId: payslip._id,
             payPeriod: payroll.period,
           },
+          customerId: wallet.customer.id,
         };
 
         // Process bank transfer
@@ -1072,7 +1080,7 @@ exports.processPayroll = async (req, res) => {
       await wallet.save({ session });
 
       payroll.status = "completed";
-      
+
       // Add tax transaction ID to payroll metadata if exists
       if (taxTransaction) {
         payroll.metadata = payroll.metadata || {};

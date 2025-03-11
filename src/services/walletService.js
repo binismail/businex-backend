@@ -450,6 +450,7 @@ class WalletService {
         accountName,
         companyId,
         employeeId,
+        customerId,
         metadata = {},
       } = transferDetails;
 
@@ -463,6 +464,7 @@ class WalletService {
         sortCode,
         accountNumber,
         accountName,
+        customerId,
         narration: metadata.narration || "Salary Payment",
         metadata: {
           companyId,
