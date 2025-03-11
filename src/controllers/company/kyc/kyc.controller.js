@@ -303,14 +303,16 @@ exports.reviewKycDocuments = async (req, res) => {
       company.kycDetails.approvalDate = new Date();
       company.kycDetails.rejectionReason = null;
 
+      const admin = await User.findById(company.admin);
+
       // Create wallet for approved company
       await WalletService.createWalletForCompany(company._id, session);
 
       await emailService.sendCompanyApprovalEmail({
-        email: company.owner.email,
+        email: company.email,
         companyName: company.name,
-        adminName: company.owner.name,
-        contactName: company.owner.name,
+        adminName: admin.name,
+        contactName: admin.name,
       });
     } else {
       company.kycStatus = "in_review";
