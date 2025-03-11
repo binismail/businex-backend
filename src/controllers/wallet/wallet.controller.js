@@ -42,15 +42,17 @@ exports.getWalletBalance = async (req, res) => {
     // Check if balance is below threshold (e.g., if less than next payroll amount)
     const nextPayroll = await Transaction.findOne({
       company: companyId,
-      type: 'payroll',
-      status: 'pending'
+      type: "payroll",
+      status: "pending",
     }).sort({ createdAt: -1 });
+
+    const newWallet = await WalletService.syncWalletBalance(companyId);
 
     if (nextPayroll && wallet.wallet.availableBalance < nextPayroll.amount) {
       // Get company admin details
-      const company = await Company.findById(companyId).populate('admin');
+      const company = await Company.findById(companyId).populate("admin");
       if (!company) {
-        throw new Error('Company not found');
+        throw new Error("Company not found");
       }
 
       // Send low balance alert
@@ -59,12 +61,12 @@ exports.getWalletBalance = async (req, res) => {
         adminName: company.admin.name,
         currentBalance: wallet.wallet.availableBalance,
         upcomingPayroll: nextPayroll.amount,
-        payrollPeriod: nextPayroll.period || 'upcoming payroll',
-        walletUrl: `${process.env.FRONTEND_URL}/wallet`
+        payrollPeriod: nextPayroll.period || "upcoming payroll",
+        walletUrl: `${process.env.FRONTEND_URL}/wallet`,
       });
     }
 
-    res.status(200).json(wallet);
+    res.status(200).json(newWallet);
   } catch (error) {
     console.error("Error getting wallet balance:", error);
     res.status(500).json({
@@ -99,9 +101,11 @@ exports.transferFunds = async (req, res) => {
           <p><strong>To:</strong> ${toCompanyId}</p>
           <p><strong>Amount:</strong> ${amount}</p>
           <p><strong>Transaction Date:</strong> ${new Date().toLocaleString()}</p>
-          <a href="${process.env.FRONTEND_URL}/wallet" class="button">View Wallet</a>
+          <a href="${
+            process.env.FRONTEND_URL
+          }/wallet" class="button">View Wallet</a>
         </div>
-      `
+      `,
     });
 
     res.status(200).json({
@@ -125,14 +129,14 @@ exports.syncWalletBalance = async (req, res) => {
     const wallet = await WalletService.syncWalletBalance(companyId);
 
     res.status(200).json({
-      message: 'Wallet balance synced',
-      wallet
+      message: "Wallet balance synced",
+      wallet,
     });
   } catch (error) {
-    console.error('Wallet Sync Error:', error);
+    console.error("Wallet Sync Error:", error);
     res.status(500).json({
-      message: 'Failed to sync wallet balance',
-      error: error.message
+      message: "Failed to sync wallet balance",
+      error: error.message,
     });
   }
 };
@@ -146,12 +150,16 @@ exports.creditWallet = async (req, res) => {
     // Validate input
     if (!amount || amount <= 0) {
       return res.status(400).json({
-        message: 'Invalid amount. Amount must be a positive number.'
+        message: "Invalid amount. Amount must be a positive number.",
       });
     }
 
     // Credit wallet
-    const result = await WalletService.creditWallet(companyId, amount, metadata);
+    const result = await WalletService.creditWallet(
+      companyId,
+      amount,
+      metadata
+    );
 
     // Send credit notification
     await emailService.sendEmail({
@@ -166,20 +174,22 @@ exports.creditWallet = async (req, res) => {
           <p><strong>Amount:</strong> ${amount}</p>
           <p><strong>New Balance:</strong> ${result.wallet.availableBalance}</p>
           <p><strong>Transaction Date:</strong> ${new Date().toLocaleString()}</p>
-          <a href="${process.env.FRONTEND_URL}/wallet" class="button">View Wallet</a>
+          <a href="${
+            process.env.FRONTEND_URL
+          }/wallet" class="button">View Wallet</a>
         </div>
-      `
+      `,
     });
 
     res.status(200).json({
-      message: 'Wallet credited successfully',
-      result
+      message: "Wallet credited successfully",
+      result,
     });
   } catch (error) {
-    console.error('Wallet Credit Error:', error);
+    console.error("Wallet Credit Error:", error);
     res.status(500).json({
-      message: 'Failed to credit wallet',
-      error: error.message
+      message: "Failed to credit wallet",
+      error: error.message,
     });
   }
 };
@@ -193,7 +203,7 @@ exports.debitWallet = async (req, res) => {
     // Validate input
     if (!amount || amount <= 0) {
       return res.status(400).json({
-        message: 'Invalid amount. Amount must be a positive number.'
+        message: "Invalid amount. Amount must be a positive number.",
       });
     }
 
@@ -213,20 +223,22 @@ exports.debitWallet = async (req, res) => {
           <p><strong>Amount:</strong> ${amount}</p>
           <p><strong>New Balance:</strong> ${result.wallet.availableBalance}</p>
           <p><strong>Transaction Date:</strong> ${new Date().toLocaleString()}</p>
-          <a href="${process.env.FRONTEND_URL}/wallet" class="button">View Wallet</a>
+          <a href="${
+            process.env.FRONTEND_URL
+          }/wallet" class="button">View Wallet</a>
         </div>
-      `
+      `,
     });
 
     res.status(200).json({
-      message: 'Wallet debited successfully',
-      result
+      message: "Wallet debited successfully",
+      result,
     });
   } catch (error) {
-    console.error('Wallet Debit Error:', error);
+    console.error("Wallet Debit Error:", error);
     res.status(500).json({
-      message: 'Failed to debit wallet',
-      error: error.message
+      message: "Failed to debit wallet",
+      error: error.message,
     });
   }
 };
@@ -252,7 +264,7 @@ exports.getWalletAccountNumber = async (req, res) => {
       message: "Wallet account number retrieved",
       accountNumber: wallet.wallet.accountNumber,
       accountName: wallet.wallet.accountName,
-      bankName: wallet.wallet.bankName
+      bankName: wallet.wallet.bankName,
     });
   } catch (error) {
     console.error("Wallet Account Number Error:", error);
@@ -267,8 +279,10 @@ exports.getWalletAccountNumber = async (req, res) => {
 exports.handleFailedTransaction = async (req, res) => {
   try {
     const { transactionId } = req.params;
-    const transaction = await Transaction.findById(transactionId).populate('company');
-    
+    const transaction = await Transaction.findById(transactionId).populate(
+      "company"
+    );
+
     if (!transaction) {
       return res.status(404).json({ message: "Transaction not found" });
     }
@@ -287,14 +301,16 @@ exports.handleFailedTransaction = async (req, res) => {
           <p><strong>Amount:</strong> ${transaction.amount}</p>
           <p><strong>Date:</strong> ${transaction.createdAt.toLocaleString()}</p>
           <p>Please check your wallet dashboard for more details and try again.</p>
-          <a href="${process.env.FRONTEND_URL}/wallet/transactions" class="button">View Transaction</a>
+          <a href="${
+            process.env.FRONTEND_URL
+          }/wallet/transactions" class="button">View Transaction</a>
         </div>
-      `
+      `,
     });
 
     res.status(200).json({
       message: "Failed transaction notification sent",
-      transaction
+      transaction,
     });
   } catch (error) {
     console.error("Error handling failed transaction:", error);
