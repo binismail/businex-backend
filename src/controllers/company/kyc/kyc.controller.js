@@ -231,7 +231,7 @@ exports.reviewKycDocuments = async (req, res) => {
   try {
     const { companyId } = req.params;
     const { documentType, status, rejectionReason } = req.body;
-    const reviewerId = req.user._id;
+    // const reviewerId = req.user._id;
 
     // Validate inputs
     const allowedStatuses = ["pending", "verified", "rejected"];
@@ -270,7 +270,7 @@ exports.reviewKycDocuments = async (req, res) => {
     // Update document status
     company.kycDetails.documentVerificationStatus[documentType] = status;
     company.kycDetails.lastCheckedAt = new Date();
-    company.kycDetails.reviewedBy = reviewerId;
+    company.kycDetails.reviewedBy = "reviewerId";
     company.kycDetails.reviewedAt = new Date();
 
     // Determine overall KYC status
