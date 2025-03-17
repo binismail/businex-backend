@@ -460,6 +460,9 @@ class WalletService {
         throw new Error("Missing required transfer details");
       }
 
+      // Generate reference
+      const reference = `salary_${Date.now()}_${employeeId}`;
+
       // Prepare transfer payload
       const payload = {
         amount,
@@ -468,12 +471,15 @@ class WalletService {
         accountName,
         customerId,
         narration: metadata.narration || "Salary Payment",
+        reference,
         metadata: {
           companyId,
           employeeId,
           ...metadata,
         },
       };
+
+      console.log("Sending transfer request with payload:", payload);
 
       // Perform bank transfer via Xpress Wallet
       const response = await axios.post(
@@ -487,12 +493,7 @@ class WalletService {
         }
       );
 
-      // Generate reference
-      const reference = Array(12)
-        .fill("")
-        .map(() => (Math.random() * 36) | 0)
-        .map((n) => (n > 9 ? String.fromCharCode(n + 55) : n.toString(10)))
-        .join("");
+      console.log("Transfer API Response:", response.data);
 
       // Create transaction record
       const transaction = new Transaction({
@@ -502,7 +503,7 @@ class WalletService {
         type: "salary_credit",
         status: response.data.status === true ? "successful" : "failed",
         description: payload.narration,
-        transactionId: response.data.transactionId,
+        transactionId: response.data.transactionId || response.data.reference || reference,
         reference,
         metadata: {
           bankDetails: {
@@ -510,15 +511,21 @@ class WalletService {
             accountNumber,
             accountName,
           },
+          apiResponse: response.data,
           ...metadata,
         },
       });
 
       await transaction.save();
 
+      if (!response.data.status) {
+        throw new Error(response.data.message || "Transfer failed");
+      }
+
       return {
-        success: response.data.status === true,
-        message: "Bank transfer processed",
+        success: true,
+        message: response.data.message || "Bank transfer processed",
+        reference,
         transaction,
         response: response.data,
       };
@@ -528,12 +535,6 @@ class WalletService {
         error.response ? error.response.data : error.message
       );
 
-      // await this.creditWallet(
-      //   transferDetails.companyId,
-      //   transferDetails.amount,
-      //   transferDetails.metadata
-      // );
-
       // Create failed transaction record
       const failedTransaction = new Transaction({
         company: transferDetails.companyId,
@@ -542,16 +543,25 @@ class WalletService {
         type: "salary_credit",
         status: "failed",
         description: "Salary Transfer Failed",
-        reference: `failed_transfer_${Date.now()}`,
+        reference: `failed_${Date.now()}_${transferDetails.employeeId}`,
         metadata: {
-          error: error.message,
+          error: error.response ? error.response.data : error.message,
+          bankDetails: {
+            sortCode: transferDetails.sortCode,
+            accountNumber: transferDetails.accountNumber,
+            accountName: transferDetails.accountName,
+          },
           ...transferDetails.metadata,
         },
       });
 
       await failedTransaction.save();
 
-      throw error;
+      return {
+        success: false,
+        error: error.response ? error.response.data.message : error.message,
+        transaction: failedTransaction
+      };
     }
   }
 
