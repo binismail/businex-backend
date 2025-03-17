@@ -99,6 +99,21 @@ class EmailService {
     });
   }
 
+  async sendSignupEmail(data) {
+    console.log("Sending signup email to:", data);
+    const templateData = {
+      userName: data.adminName || data.contactName,
+      dashboardUrl: `${process.env.FRONTEND_URL}/dashboard`,
+      email: data.adminEmail,
+    };
+    return this.sendEmail({
+      to: data.adminEmail,
+      subject: "Welcome to BusineX!",
+      text: `Dear ${templateData.userName}, Thank you for signing up with BusineX. Kindly go ahead and complete your company onboarding process to start using the platform.`,
+      html: templates.signupEmail(templateData),
+    });
+  }
+
   async sendCompanyApprovalEmail(companyData) {
     const templateData = {
       userName: companyData.adminName || companyData.contactName,
@@ -119,7 +134,7 @@ class EmailService {
     return this.sendEmail({
       to: payrollData.adminEmail,
       subject: "Payroll Successfully Processed",
-      text: `Your payroll for ${payrollData.period} has been processed successfully.`,
+      text: `Your payroll for ${payrollData.period.start_date} - ${payrollData.period.end_date} has been processed successfully.`,
       html: templates.payrollProcessed(payrollData),
     });
   }
@@ -128,7 +143,7 @@ class EmailService {
     return this.sendEmail({
       to: payrollData.adminEmail,
       subject: "Payroll Processing Failed",
-      text: `There was an error processing your payroll for ${payrollData.period}.`,
+      text: `There was an error processing your payroll for ${payrollData.period.start_date} - ${payrollData.period.end_date}.`,
       html: templates.payrollFailed(payrollData),
     });
   }
@@ -136,8 +151,8 @@ class EmailService {
   async sendPayslipEmail(payslipData) {
     return this.sendEmail({
       to: payslipData.employeeEmail,
-      subject: `Your Payslip for ${payslipData.period}`,
-      text: `Your payslip for ${payslipData.period} is now available.`,
+      subject: `Your Payslip for ${payslipData.period.start_date} - ${payslipData.period.end_date}`,
+      text: `Your payslip for ${payslipData.period.start_date} - ${payslipData.period.end_date} is now available.`,
       html: templates.payslip(payslipData),
     });
   }

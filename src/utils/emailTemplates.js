@@ -185,6 +185,90 @@ const templates = {
     </html>
   `,
 
+  // Company Onboarding Templates
+  signupEmail: (data) => `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Welcome to BusineX!</title>
+      <style>
+        * {
+          margin: 0;
+          padding: 0;
+          box-sizing: border-box;
+        }
+        body {
+          font-family: Arial, sans-serif;
+          line-height: 1.6;
+          background-color: #f4f4f4;
+        }
+        .email-container {
+          max-width: 600px;
+          margin: 0 auto;
+          background-color: #ffffff;
+        }
+        .header {
+          background-color: #004D40;
+          padding: 20px;
+          text-align: center;
+        }
+        .logo {
+          color: white;
+          font-size: 24px;
+          font-weight: bold;
+        }
+        .content {
+          padding: 30px 20px;
+        }
+        .footer {
+          padding: 20px;
+          text-align: center;
+          font-size: 12px;
+          color: #666666;
+          background-color: #f9f9f9;
+        }
+        .button {
+          display: inline-block;
+          padding: 12px 24px;
+          background-color: #004D40;
+          color: white !important;
+          text-decoration: none;
+          border-radius: 4px;
+          margin: 20px 0;
+          text-align: center;
+        }
+        h2 {
+          color: #333333;
+          margin-bottom: 20px;
+        }
+        p {
+          margin-bottom: 15px;
+          color: #555555;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="email-container">
+        <div class="header">
+          <div class="logo">BusineX</div>
+        </div>
+        <div class="content">
+          <h2>Thank you for signing up</h2>
+          <p>Dear ${data.userName},</p>
+          <p>Thank you for signing up with BusineX. Kindly go ahead and complete your company onboarding process to start using the platform.</p>
+          <p style="margin-top: 20px;">Should you have any questions, feel free to contact us at <a href="mailto:support@businex.com" style="color: #004D40;">support@businex.com</a>.</p>
+          <a href="${data.dashboardUrl}" class="button">Start Using BusineX</a>
+        </div>
+        <div class="footer">
+          <p> ${new Date().getFullYear()} BusineX. All rights reserved.</p>
+        </div>
+      </div>
+    </body>
+    </html>
+  `,
+
   companyApproved: (data) => `
     <!DOCTYPE html>
     <html>

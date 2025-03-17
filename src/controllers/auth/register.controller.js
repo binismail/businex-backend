@@ -3,6 +3,7 @@ const User = require("../../models/user.model");
 
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const emailService = require("../../utils/email");
 
 exports.register = async (req, res) => {
   try {
@@ -41,6 +42,13 @@ exports.register = async (req, res) => {
       process.env.JWT_SECRET,
       { expiresIn: "24h" }
     );
+
+    // Send signup email
+    await emailService.sendSignupEmail({
+      adminName: name,
+      adminEmail: email,
+      dashboardUrl: `${process.env.FRONTEND_URL}/dashboard`,
+    });
 
     res.status(201).json({
       message: "Registration successful",

@@ -556,7 +556,7 @@ exports.schedulePayroll = async (req, res) => {
           if (employee.stateOfResidence?.toLowerCase() === "lagos") {
             tax = calculateTax(grossPay).monthlyTax;
           }
-          const pension = Math.round(baseSalary * 0.08);
+          // const pension = Math.round(baseSalary * 0.08);
 
           const defaultDeductions = [
             {
@@ -567,7 +567,7 @@ exports.schedulePayroll = async (req, res) => {
             },
             {
               type: "pension",
-              amount: pension,
+              amount: 0,
               description: "Pension Contribution",
             },
           ];

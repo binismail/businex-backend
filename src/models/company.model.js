@@ -47,13 +47,20 @@ const companySchema = new Schema(
         email: { type: String, required: true },
         phone: { type: String, required: true },
         bvn: { type: String, default: "" },
+        idDocumentUrl: { type: String, default: "" },
+        status: {
+          type: String,
+          enum: ["pending", "verified", "rejected"],
+          default: "pending",
+        },
+        rejectionReason: { type: String, default: "" },
       },
     ],
     // Payroll Settings
     payroll: {
       payrollFrequency: {
         type: String,
-        enum: ["weekly", "biweekly", "monthly"],
+        enum: ["weekly", "biweekly", "monthly", "one-off", "quarterly"],
         default: "monthly",
       },
       defaultPayday: { type: String, default: "28" },

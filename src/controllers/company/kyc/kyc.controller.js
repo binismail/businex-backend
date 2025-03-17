@@ -5,6 +5,7 @@ const { seedDefaultDepartments } = require("../../../utils/defaultDepartments");
 const emailService = require("../../../utils/email");
 const WalletService = require("../../../services/walletService");
 const { default: mongoose } = require("mongoose");
+const { templates } = require("../../../utils/emailTemplates");
 
 // Save onboarding step data
 exports.saveOnboardingStep = async (req, res) => {
@@ -286,13 +287,14 @@ exports.reviewKycDocuments = async (req, res) => {
     if (hasRejected) {
       company.kycStatus = "rejected";
       company.kycDetails.rejectionReason = rejectionReason;
+      const admin = await User.findById(company.admin);
 
       await emailService.sendEmail({
-        to: company.owner.email,
+        to: admin.email,
         subject: "KYC Document Verification Update",
         text: `Your ${documentType} document was rejected. Reason: ${rejectionReason}`,
         html: templates.kycDocumentRejected({
-          userName: company.owner.firstName,
+          userName: admin.name,
           documentType,
           rejectionReason,
           kycUrl: `${process.env.FRONTEND_URL}/kyc`,
